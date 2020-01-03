@@ -268,36 +268,62 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
     c = ""
     if container is not None:
         c = "-c " + container
+    
+    print(remote_cmd, flush=True)
+    if "fortio load" in remote_cmd:
+        remote_cmd = remote_cmd.replace("fortio load", "nighthawk_client")
+        remote_cmd = remote_cmd.replace("-c", "--connections")
+        remote_cmd = remote_cmd.replace("-qps", "--rps")
+        remote_cmd = remote_cmd.replace("-t", "--duration")
+        # Short duration for testing
+        remote_cmd = remote_cmd.replace("93s", "1")
+        # We don't have a configurable bucket resolution
+        remote_cmd = remote_cmd.replace("-r 0.00005", "")
+        # NH doesn't have an option to dump files like this
+        remote_cmd = remote_cmd.replace("-a ", " ")
+        # NH doesn't allow configuring http buffer size
+        remote_cmd = remote_cmd.replace("-httpbufferkb=128", "")
+        # NH doesn't have labels as of today
+        remote_cmd = re.sub(r'-labels[^ ]* [^ ]*', '', remote_cmd)
+        remote_cmd = remote_cmd + " --output-format json"
+        # TODO(oschaaf): figure out how to get to the ip/port properly.
+        remote_cmd = remote_cmd + " --nighthawk-service 192.168.39.163:30528"
+        docker_cmd = "docker run oschaaf/nighthawk-dev:latest %s" % remote_cmd
+        print(docker_cmd, flush=True)
+        # Use a local docker instance of Nighgawk to apply load with the remote nighthawk_service
+        process = subprocess.Popen(shlex.split(docker_cmd), stdout=subprocess.PIPE)
+        (output, err) = process.communicate()
+        exit_code = process.wait()
+        if exit_code == 0:
+            dest = os.path.join(os.getcwd(), "nighthawk-out")
+            # Store Nighthawk's native format as the fortio transform
+            # looses some information.
+            with open("%s.json" % dest, 'wb') as f:
+                f.write(output)
+            # Send human readable output to the command line
+            os.system("cat nighthawk-out.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format human")
+            # Store fortio transformed output.
+            os.system("cat nighthawk-out.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format fortio > %s.fortio.json" % dest)
+        else:
+            print("nighthawk remote execution error: %s" % exit_code)
+            if output:
+                print("--> stdout: %s" %  output.decode("utf-8"))
+            if err:
+                print("--> stderr: %s" %  err.decode("utf-8"))
+        return
+
     cmd = "kubectl --namespace {namespace} exec {pod} {c} -- {remote_cmd}".format(
         pod=pod,
         remote_cmd=remote_cmd,
         c=c,
         namespace=namespace)
-    print(cmd, flush=True)
-    if "fortio load" in cmd:
-        cmd = cmd.replace("fortio load", "nighthawk_client")
-        cmd = cmd.replace("-c", "--connections")
-        cmd = cmd.replace("-qps", "--rps")
-        cmd = cmd.replace("-t", "--duration")
-        # Short duration for testing
-        cmd = cmd.replace("93s", "1")
-        # We don't have a configurable bucket resolution
-        cmd = cmd.replace("-r 0.00005", "")
-        # NH doesn't have an option to dump files like this
-        cmd = cmd.replace("-a ", " ")
-        # NH doesn't allow configuring http buffer size
-        cmd = cmd.replace("-httpbufferkb=128", "")
-        # NH doesn't have labels as of today
-        cmd = re.sub(r'-labels[^ ]* [^ ]*', '', cmd)
-        cmd = cmd + " --output-format fortio"
-        print(cmd, flush=True)
     runfn(cmd)
 
 
 def rc(command):
     process = subprocess.Popen(command.split(), stdout=subprocess.PIPE)
     while True:
-        output = process.stdout.readline()
+        output = process.stdout.readline().decode("utf-8")
         if output == '' and process.poll() is not None:
             break
         if output:

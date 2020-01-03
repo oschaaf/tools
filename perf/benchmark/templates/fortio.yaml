@@ -41,6 +41,9 @@ spec:
   - name: grpc-pinga
     port: 8077
     protocol: TCP
+  - name: nighthawk-service
+    port: 8443
+    protocol: TCP
   selector:
     app: {{ $.name }}
 {{- if $.V.expose }}
@@ -122,6 +125,8 @@ spec:
         - containerPort: 8080
           protocol: TCP
         - containerPort: 8079
+          protocol: TCP
+        - containerPort: 8443
           protocol: TCP
         resources:
 {{- if $.Values.appresources1 }}
