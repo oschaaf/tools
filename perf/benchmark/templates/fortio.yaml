@@ -101,20 +101,6 @@ spec:
       labels:
         app: {{ $.name }}
     spec:
-      affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-{{- if eq $.name "fortioclient" }}
-                - "fortioserver"
-{{- else }}
-                - "fortioclient"
-{{- end }}
-            topologyKey: "kubernetes.io/hostname"
       volumes:
       - name: shared-data
         emptyDir: {}
@@ -125,10 +111,12 @@ spec:
         volumeMounts:
         - name: shared-data
           mountPath: /var/lib/fortio
-        image: {{ $.Values.fortioImage }}
 {{- if eq $.name "fortioclient" }}
+        image: {{ $.Values.nighthawkImage }}
         args:
-        - report
+          - nighthawk_service
+{{- else }}
+        image: {{ $.Values.fortioImage }}
 {{- end }}
         ports:
         - containerPort: 8080

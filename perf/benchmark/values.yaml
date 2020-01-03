@@ -15,6 +15,7 @@ appresources1:
     memory: "1000m"
 
 fortioImage: fortio/fortio:latest_release
+nighthawkImage: oschaaf/nighthawk-dev:latest
 curlImage: tutum/curl:trusty
 domain: local
 gateway: fortio-gateway

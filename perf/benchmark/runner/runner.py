@@ -21,6 +21,7 @@ import argparse
 import subprocess
 import shlex
 import uuid
+import re
 import sys
 from subprocess import getoutput
 from urllib.parse import urlparse
@@ -273,6 +274,23 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
         c=c,
         namespace=namespace)
     print(cmd, flush=True)
+    if "fortio load" in cmd:
+        cmd = cmd.replace("fortio load", "nighthawk_client")
+        cmd = cmd.replace("-c", "--connections")
+        cmd = cmd.replace("-qps", "--rps")
+        cmd = cmd.replace("-t", "--duration")
+        # Short duration for testing
+        cmd = cmd.replace("93s", "1")
+        # We don't have a configurable bucket resolution
+        cmd = cmd.replace("-r 0.00005", "")
+        # NH doesn't have an option to dump files like this
+        cmd = cmd.replace("-a ", " ")
+        # NH doesn't allow configuring http buffer size
+        cmd = cmd.replace("-httpbufferkb=128", "")
+        # NH doesn't have labels as of today
+        cmd = re.sub(r'-labels[^ ]* [^ ]*', '', cmd)
+        cmd = cmd + " --output-format fortio"
+        print(cmd, flush=True)
     runfn(cmd)
 
 
