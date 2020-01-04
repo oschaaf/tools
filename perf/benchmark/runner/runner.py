@@ -57,6 +57,7 @@ def run_command(command):
 
 def run_command_sync(command):
     op = getoutput(command)
+    print (op)
     return op.strip()
 
 
@@ -188,6 +189,7 @@ class Fortio:
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
             kubectl_exec(self.client.name, self.ingress(fortio_cmd))
+
             if self.perf_record:
                 run_perf(
                     self.mesh,
@@ -254,11 +256,17 @@ def run_perf(mesh, pod, labels, duration=20):
 
 def kubectl_cp(from_file, to_file, container):
     namespace = os.environ.get("NAMESPACE", "twopods")
-    cmd = "kubectl --namespace {namespace} cp {from_file} {to_file} -c {container}".format(
-        namespace=namespace,
-        from_file=from_file,
-        to_file=to_file,
-        container=container)
+    if not container:
+        cmd = "kubectl --namespace {namespace} cp {from_file} {to_file}".format(
+            namespace=namespace,
+            from_file=from_file,
+            to_file=to_file)
+    else:
+        cmd = "kubectl --namespace {namespace} cp {from_file} {to_file} -c {container}".format(
+            namespace=namespace,
+            from_file=from_file,
+            to_file=to_file,
+            container=container)
     print(cmd, flush=True)
     run_command_sync(cmd)
 
@@ -270,40 +278,48 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
         c = "-c " + container
     
     print(remote_cmd, flush=True)
+    # TODO: just create a different call for this
+    # TODO: clean this up
     if "fortio load" in remote_cmd:
         remote_cmd = remote_cmd.replace("fortio load", "nighthawk_client")
         remote_cmd = remote_cmd.replace("-c", "--connections")
         remote_cmd = remote_cmd.replace("-qps", "--rps")
         remote_cmd = remote_cmd.replace("-t", "--duration")
         # Short duration for testing
-        remote_cmd = remote_cmd.replace("93s", "1")
+        remote_cmd = remote_cmd.replace("93s", "93")
         # We don't have a configurable bucket resolution
         remote_cmd = remote_cmd.replace("-r 0.00005", "")
-        # NH doesn't have an option to dump files like this
+        # NH doesn't have an option to dump files like this, and we don't need
+        # it as of now.
         remote_cmd = remote_cmd.replace("-a ", " ")
         # NH doesn't allow configuring http buffer size
         remote_cmd = remote_cmd.replace("-httpbufferkb=128", "")
         # NH doesn't have labels as of today
-        remote_cmd = re.sub(r'-labels[^ ]* [^ ]*', '', remote_cmd)
+        p = re.compile("-labels([^ ]* [^ ]*)")
+        label = p.search(remote_cmd).group(1).strip()
+        remote_cmd = re.sub(p, '', remote_cmd)
         remote_cmd = remote_cmd + " --output-format json"
         # TODO(oschaaf): figure out how to get to the ip/port properly.
-        remote_cmd = remote_cmd + " --nighthawk-service 192.168.39.163:30528"
+        remote_cmd = remote_cmd + " --nighthawk-service 192.168.39.163:30734"
         docker_cmd = "docker run oschaaf/nighthawk-dev:latest %s" % remote_cmd
         print(docker_cmd, flush=True)
-        # Use a local docker instance of Nighgawk to apply load with the remote nighthawk_service
+        # Use a local docker instance of Nighhawk to apply load with the remote nighthawk_service
         process = subprocess.Popen(shlex.split(docker_cmd), stdout=subprocess.PIPE)
         (output, err) = process.communicate()
         exit_code = process.wait()
         if exit_code == 0:
-            dest = os.path.join(os.getcwd(), "nighthawk-out")
+            dest = os.path.join(os.getcwd(), "nighthawk-out-%s" % label)
             # Store Nighthawk's native format as the fortio transform
             # looses some information.
             with open("%s.json" % dest, 'wb') as f:
                 f.write(output)
             # Send human readable output to the command line
-            os.system("cat nighthawk-out.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format human")
+            os.system("cat %s.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format human" % dest)
             # Store fortio transformed output.
-            os.system("cat nighthawk-out.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format fortio > %s.fortio.json" % dest)
+            os.system("cat %s.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format fortio > %s.fortio.json" % (dest, dest))
+            # Copy the fortio json over to the pod so the fortio report server
+            # can take it from there.
+            kubectl_cp("%s.fortio.json" % dest, pod + ":" + "/var/lib/fortio/%s.fortio.json" % label, container)
         else:
             print("nighthawk remote execution error: %s" % exit_code)
             if output:

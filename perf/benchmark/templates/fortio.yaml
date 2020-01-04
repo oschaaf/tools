@@ -145,10 +145,15 @@ spec:
       - name: uncaptured
         securityContext:
           runAsUser: 1
+        volumeMounts:
+        - name: shared-data
+          mountPath: /var/lib/fortio
         image: {{ $.Values.fortioImage }}
         args:
 {{- if eq $.name "fortioclient" }}
         - report
+        - -data-dir
+        - "/var/lib/fortio/"
 {{- else }}
         - server
 {{- end }}
