@@ -277,7 +277,6 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
     if container is not None:
         c = "-c " + container
     
-    print(remote_cmd, flush=True)
     # TODO: just create a different call for this
     # TODO: clean this up
     if "fortio load" in remote_cmd:
@@ -294,13 +293,23 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
         remote_cmd = remote_cmd.replace("-a ", " ")
         # NH doesn't allow configuring http buffer size
         remote_cmd = remote_cmd.replace("-httpbufferkb=128", "")
-        # NH doesn't have labels as of today
+
+        # Save and strip the fortio label
         p = re.compile("-labels([^ ]* [^ ]*)")
         label = p.search(remote_cmd).group(1).strip()
-        remote_cmd = re.sub(p, '', remote_cmd)
-        remote_cmd = remote_cmd + " --output-format json"
+
+        extra_args = ""
+        # Recreate the NH equivalent of the saved label
+        extra_args = extra_args + " --output-format json"
+        # Recreate the NH equivalent of the saved label
+        extra_args = extra_args + " --label %s" % label
+        # Additionally add the "Nighthawk" label
+        extra_args = extra_args + " --label Nighthawk"
         # TODO(oschaaf): figure out how to get to the ip/port properly.
-        remote_cmd = remote_cmd + " --nighthawk-service 192.168.39.163:30734"
+        extra_args = extra_args + " --nighthawk-service 192.168.39.163:30734"
+        extra_args = extra_args + " "
+        remote_cmd = re.sub(p, extra_args, remote_cmd)
+
         docker_cmd = "docker run oschaaf/nighthawk-dev:latest %s" % remote_cmd
         print(docker_cmd, flush=True)
         # Use a local docker instance of Nighhawk to apply load with the remote nighthawk_service
