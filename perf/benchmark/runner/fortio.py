@@ -46,6 +46,11 @@ def convert_data(data):
         if key == "ActualDuration":
             obj[key] = int(data[key] / 10 ** 9)
             continue
+        if key == "Labels":
+            # We append " nighthawk", which the graph generator scripts does not
+            # like. Hence we remove it here.
+            obj[key] = data[key].split(" ")[0]
+            continue
         # fill out other data key to obj key
         obj[key] = data[key]
 
@@ -61,11 +66,17 @@ def convert_data(data):
 
     success = 0
     if '200' in data["RetCodes"]:
-        success = data["RetCodes"]["200"]
+        success = int(data["RetCodes"]["200"])
 
+    # This used to be computed based on the histogram sizes count. We use the
+    # duration histogram count instead, as that is how the fortio UI does it
+    # (and we don't have the Sizes histogram yet at this time).
+    # Either way I wonder: will we miss connection failures?
     obj["errorPercent"] = 100 * \
-        (data["Sizes"]["Count"] - success) / data["Sizes"]["Count"]
-    obj["Payload"] = int(data['Sizes']['Avg'])
+        (int(data["DurationHistogram"]["Count"]) - success) / int(data["DurationHistogram"]["Count"])
+    # TODO(oschaaf): 
+    #obj["Payload"] = int(data['Sizes']['Avg'])
+    print(obj)
     return obj
 
 
