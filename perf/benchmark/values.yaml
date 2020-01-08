@@ -43,3 +43,5 @@ client: # client overrides
 
 cert: false
 interceptionMode: REDIRECT
+
+namespace: ""
