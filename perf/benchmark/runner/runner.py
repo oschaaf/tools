@@ -285,7 +285,8 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
         remote_cmd = remote_cmd.replace("-qps", "--rps")
         remote_cmd = remote_cmd.replace("-t", "--duration")
         # Short duration for testing
-        remote_cmd = remote_cmd.replace("93s", "93")
+        remote_cmd = remote_cmd.replace("93s", "2")
+        remote_cmd = remote_cmd.replace("240s", "2")
         # We don't have a configurable bucket resolution
         remote_cmd = remote_cmd.replace("-r 0.00005", "")
         # NH doesn't have an option to dump files like this, and we don't need

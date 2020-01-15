@@ -74,8 +74,7 @@ def convert_data(data):
     # Either way I wonder: will we miss connection failures?
     obj["errorPercent"] = 100 * \
         (int(data["DurationHistogram"]["Count"]) - success) / int(data["DurationHistogram"]["Count"])
-    # TODO(oschaaf): 
-    #obj["Payload"] = int(data['Sizes']['Avg'])
+    obj["Payload"] = int(data['Sizes']['Avg'])
     print(obj)
     return obj
 
