@@ -1,3 +1,4 @@
+#!/bin/bash
 # Copyright Istio Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,13 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from django.conf.urls import url
-from . import views
-
-urlpatterns = [
-    url('cpu_memory/', views.cpu_memory, name="cpu_memory"),
-    url('latency_vs_connection/', views.latency_vs_conn, name="latency_conn"),
-    url('latency_vs_qps/', views.latency_vs_qps, name="latency_qps"),
-    url('flame_graph/', views.flame_graph, name="flame_graph"),
-    url('micro_benchmarks/', views.micro_benchmarks, name="micro_benchmarks"),
-]
+python manage.py makemigrations
+python manage.py migrate
+python manage.py runserver 0.0.0.0:8000
