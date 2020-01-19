@@ -23,6 +23,7 @@ import shlex
 import uuid
 import re
 import sys
+import time
 from subprocess import getoutput
 from urllib.parse import urlparse
 import yaml
@@ -33,21 +34,28 @@ POD = collections.namedtuple('Pod', ['name', 'namespace', 'ip', 'labels'])
 
 
 def pod_info(filterstr="", namespace=os.environ.get("NAMESPACE", "twopods"), multi_ok=True):
-    cmd = "kubectl -n {namespace} get pod {filterstr}  -o json".format(
-        namespace=namespace, filterstr=filterstr)
-    op = getoutput(cmd)
-    o = json.loads(op)
-    items = o['items']
+    max_attempts = 30
+    while max_attempts > 0:
+        cmd = "kubectl -n {namespace} get pod {filterstr}  -o json".format(
+            namespace=namespace, filterstr=filterstr)
+        op = getoutput(cmd)
+        o = json.loads(op)
+        items = o['items']
 
-    if not multi_ok and len(items) > 1:
-        raise Exception("more than one found " + op)
+        if not multi_ok and len(items) > 1:
+            raise Exception("more than one found " + op)
 
-    if not items:
-        raise Exception("no pods found with command [" + cmd + "]")
+        if not items:
+            raise Exception("no pods found with command [" + cmd + "]")
 
-    i = items[0]
-    return POD(i['metadata']['name'], i['metadata']['namespace'],
-               i['status']['podIP'], i['metadata']['labels'])
+        i = items[0]
+        if not 'podIP' in i['status']:
+            time.sleep(1)
+            max_attempts = max_attempts - 1
+            continue
+        return POD(i['metadata']['name'], i['metadata']['namespace'],
+                   i['status']['podIP'], i['metadata']['labels'])
+    print("Timeout waiting for pod IP")
 
 
 def run_command(command):
@@ -57,7 +65,7 @@ def run_command(command):
 
 def run_command_sync(command):
     op = getoutput(command)
-    print (op)
+    print(op)
     return op.strip()
 
 
@@ -173,7 +181,11 @@ class Fortio:
 
         cacert_arg = ""
         if self.cacert is not None:
-            cacert_arg = "-cacert {cacert_path}".format(cacert_path=self.cacert)
+            cacert_arg = "-cacert {cacert_path}".format(
+                cacert_path=self.cacert)
+
+        #process = subprocess.Popen(shlex.split("kubectl -n \"%s\" port-forward svc/fortioclient 8443:8443" %
+        #                                       os.environ.get("NAMESPACE", "twopods")), stdout=subprocess.PIPE)
 
         fortio_cmd = (
             "fortio load -c {conn} -qps {qps} -t {duration}s -a -r {r} {cacert_arg} {grpc} -httpbufferkb=128 " +
@@ -189,7 +201,6 @@ class Fortio:
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
             kubectl_exec(self.client.name, self.ingress(fortio_cmd))
-
             if self.perf_record:
                 run_perf(
                     self.mesh,
@@ -250,7 +261,8 @@ def run_perf(mesh, pod, labels, duration=20):
             duration=duration),
         container=mesh + "-proxy")
 
-    kubectl_cp(pod + ":" + filepath + ".perf", LOCAL_FLAMEOUTPUT + filename + ".perf", mesh + "-proxy")
+    kubectl_cp(pod + ":" + filepath + ".perf", LOCAL_FLAMEOUTPUT +
+               filename + ".perf", mesh + "-proxy")
     run_command_sync(LOCAL_FLAMEPATH + " " + filename + ".perf")
 
 
@@ -276,7 +288,7 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
     c = ""
     if container is not None:
         c = "-c " + container
-    
+
     # TODO: just create a different call for this
     # TODO: clean this up
     if "fortio load" in remote_cmd:
@@ -306,15 +318,15 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
         extra_args = extra_args + " --label %s" % label
         # Additionally add the "Nighthawk" label
         extra_args = extra_args + " --label Nighthawk"
-        # TODO(oschaaf): figure out how to get to the ip/port properly.
-        extra_args = extra_args + " --nighthawk-service 192.168.39.163:30734"
+        extra_args = extra_args + " --nighthawk-service localhost:32593"
         extra_args = extra_args + " "
         remote_cmd = re.sub(p, extra_args, remote_cmd)
 
         docker_cmd = "docker run oschaaf/nighthawk-dev:latest %s" % remote_cmd
         print(docker_cmd, flush=True)
         # Use a local docker instance of Nighhawk to apply load with the remote nighthawk_service
-        process = subprocess.Popen(shlex.split(docker_cmd), stdout=subprocess.PIPE)
+        process = subprocess.Popen(shlex.split(
+            docker_cmd), stdout=subprocess.PIPE)
         (output, err) = process.communicate()
         exit_code = process.wait()
         if exit_code == 0:
@@ -324,18 +336,20 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
             with open("%s.json" % dest, 'wb') as f:
                 f.write(output)
             # Send human readable output to the command line
-            os.system("cat %s.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format human" % dest)
+            os.system(
+                "cat %s.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format human" % dest)
             # Store fortio transformed output.
             os.system("cat %s.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format fortio > %s.fortio.json" % (dest, dest))
             # Copy the fortio json over to the pod so the fortio report server
             # can take it from there.
-            kubectl_cp("%s.fortio.json" % dest, pod + ":" + "/var/lib/fortio/%s.fortio.json" % label, container)
+            kubectl_cp("%s.fortio.json" % dest, pod + ":" +
+                       "/var/lib/fortio/%s.fortio.json" % label, container)
         else:
             print("nighthawk remote execution error: %s" % exit_code)
             if output:
-                print("--> stdout: %s" %  output.decode("utf-8"))
+                print("--> stdout: %s" % output.decode("utf-8"))
             if err:
-                print("--> stderr: %s" %  err.decode("utf-8"))
+                print("--> stderr: %s" % err.decode("utf-8"))
         return
 
     cmd = "kubectl --namespace {namespace} exec {pod} {c} -- {remote_cmd}".format(
@@ -365,7 +379,8 @@ def validate(job_config):
             return False
         exp_type = required_fields[k]
         if not isinstance(job_config[k], exp_type):
-            print("expecting type of parameter {} to be {}, got {}".format(k, exp_type, type(job_config[k])))
+            print("expecting type of parameter {} to be {}, got {}".format(
+                k, exp_type, type(job_config[k])))
             return False
     return True
 
