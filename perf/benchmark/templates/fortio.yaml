@@ -264,6 +264,11 @@ spec:
           runAsUser: 1
 {{- if eq $.name "fortioclient" }}
         image: {{ $.Values.fortioImage }}
+        volumeMounts:
+        - name: shared-data
+          mountPath: /var/lib/fortio
+        - name: nighthawk-test-server-config
+          mountPath: /var/lib/nighthawk 
         args:
         - report
         - -http-port
@@ -272,6 +277,8 @@ spec:
         - "8076"
         - -redirect-port
         - "8078"
+        - -data-dir
+        - /var/lib/fortio/
 {{- else }}
         image: {{ $.Values.nighthawkImage }}
         volumeMounts:

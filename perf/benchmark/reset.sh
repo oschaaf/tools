@@ -3,7 +3,7 @@
 set +x
 set -e 
 
-kubectl delete --grace-period=0 --force namespace twopods || true
+#kubectl delete --grace-period=0 --force namespace twopods || true
 DNS_DOMAIN=localhost ./setup_test.sh || true
 
 NIGHTHAWK_CLIENT=$(kubectl -n twopods get pods --sort-by='.status.containerStatuses[0].restartCount' -lapp=fortioclient -o custom-columns=NAME:.metadata.name --no-headers)
