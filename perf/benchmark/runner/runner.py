@@ -22,7 +22,7 @@ import subprocess
 import shlex
 import uuid
 import sys
-from subprocess import getoutput
+from subprocess import getoutput, getstatusoutput
 from urllib.parse import urlparse
 import yaml
 from fortio import METRICS_START_SKIP_DURATION, METRICS_END_SKIP_DURATION
@@ -55,7 +55,10 @@ def run_command(command):
 
 
 def run_command_sync(command):
-    op = getoutput(command)
+ #   print(command)
+    status, op = getstatusoutput(command)
+    print(status)
+    print(op)
     return op.strip()
 
 
@@ -326,6 +329,8 @@ def fortio_from_config_file(args):
 
 def run(args):
     min_duration = METRICS_START_SKIP_DURATION + METRICS_END_SKIP_DURATION
+    #server_pod = run_command_sync(["kubectl -n twopods get pods --sort-by='.status.containerStatuses[0].restartCount' -lapp=fortioserver -o custom-columns=NAME:.metadata.name --no-headers"])
+    #client_pod = run_command_sync(["kubectl -n twopods get pods --sort-by='.status.containerStatuses[0].restartCount' -lapp=fortioclient -o custom-columns=NAME:.metadata.name --no-headers"])    
 
     # run with config files
     if args.config_file is not None:
