@@ -21,8 +21,10 @@ import argparse
 import subprocess
 import shlex
 import uuid
+import re
 import sys
-from subprocess import getoutput, getstatusoutput
+import time
+from subprocess import getoutput
 from urllib.parse import urlparse
 import yaml
 from fortio import METRICS_START_SKIP_DURATION, METRICS_END_SKIP_DURATION
@@ -32,21 +34,28 @@ POD = collections.namedtuple('Pod', ['name', 'namespace', 'ip', 'labels'])
 
 
 def pod_info(filterstr="", namespace=os.environ.get("NAMESPACE", "twopods"), multi_ok=True):
-    cmd = "kubectl -n {namespace} get pod {filterstr}  -o json".format(
-        namespace=namespace, filterstr=filterstr)
-    op = getoutput(cmd)
-    o = json.loads(op)
-    items = o['items']
+    max_attempts = 30
+    while max_attempts > 0:
+        cmd = "kubectl -n {namespace} get pod {filterstr}  -o json".format(
+            namespace=namespace, filterstr=filterstr)
+        op = getoutput(cmd)
+        o = json.loads(op)
+        items = o['items']
 
-    if not multi_ok and len(items) > 1:
-        raise Exception("more than one found " + op)
+        if not multi_ok and len(items) > 1:
+            raise Exception("more than one found " + op)
 
-    if not items:
-        raise Exception("no pods found with command [" + cmd + "]")
+        if not items:
+            raise Exception("no pods found with command [" + cmd + "]")
 
-    i = items[0]
-    return POD(i['metadata']['name'], i['metadata']['namespace'],
-               i['status']['podIP'], i['metadata']['labels'])
+        i = items[0]
+        if not 'podIP' in i['status']:
+            time.sleep(1)
+            max_attempts = max_attempts - 1
+            continue
+        return POD(i['metadata']['name'], i['metadata']['namespace'],
+                   i['status']['podIP'], i['metadata']['labels'])
+    print("Timeout waiting for pod IP")
 
 
 def run_command(command):
@@ -55,9 +64,7 @@ def run_command(command):
 
 
 def run_command_sync(command):
- #   print(command)
-    status, op = getstatusoutput(command)
-    print(status)
+    op = getoutput(command)
     print(op)
     return op.strip()
 
@@ -174,7 +181,11 @@ class Fortio:
 
         cacert_arg = ""
         if self.cacert is not None:
-            cacert_arg = "-cacert {cacert_path}".format(cacert_path=self.cacert)
+            cacert_arg = "-cacert {cacert_path}".format(
+                cacert_path=self.cacert)
+
+        #process = subprocess.Popen(shlex.split("kubectl -n \"%s\" port-forward svc/fortioclient 8443:8443" %
+        #                                       os.environ.get("NAMESPACE", "twopods")), stdout=subprocess.PIPE)
 
         fortio_cmd = (
             "fortio load -c {conn} -qps {qps} -t {duration}s -a -r {r} {cacert_arg} {grpc} -httpbufferkb=128 " +
@@ -250,17 +261,24 @@ def run_perf(mesh, pod, labels, duration=20):
             duration=duration),
         container=mesh + "-proxy")
 
-    kubectl_cp(pod + ":" + filepath + ".perf", LOCAL_FLAMEOUTPUT + filename + ".perf", mesh + "-proxy")
+    kubectl_cp(pod + ":" + filepath + ".perf", LOCAL_FLAMEOUTPUT +
+               filename + ".perf", mesh + "-proxy")
     run_command_sync(LOCAL_FLAMEPATH + " " + filename + ".perf")
 
 
 def kubectl_cp(from_file, to_file, container):
     namespace = os.environ.get("NAMESPACE", "twopods")
-    cmd = "kubectl --namespace {namespace} cp {from_file} {to_file} -c {container}".format(
-        namespace=namespace,
-        from_file=from_file,
-        to_file=to_file,
-        container=container)
+    if not container:
+        cmd = "kubectl --namespace {namespace} cp {from_file} {to_file}".format(
+            namespace=namespace,
+            from_file=from_file,
+            to_file=to_file)
+    else:
+        cmd = "kubectl --namespace {namespace} cp {from_file} {to_file} -c {container}".format(
+            namespace=namespace,
+            from_file=from_file,
+            to_file=to_file,
+            container=container)
     print(cmd, flush=True)
     run_command_sync(cmd)
 
@@ -270,19 +288,82 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
     c = ""
     if container is not None:
         c = "-c " + container
+
+    # TODO: just create a different call for this
+    # TODO: clean this up
+    if "fortio load" in remote_cmd:
+        remote_cmd = remote_cmd.replace("fortio load", "nighthawk_client")
+        remote_cmd = remote_cmd.replace("-c", "--connections")
+        remote_cmd = remote_cmd.replace("-qps", "--rps")
+        remote_cmd = remote_cmd.replace("-t", "--duration")
+        # Short duration for testing
+        remote_cmd = remote_cmd.replace("93s", "2")
+        remote_cmd = remote_cmd.replace("240s", "2")
+        # We don't have a configurable bucket resolution
+        remote_cmd = remote_cmd.replace("-r 0.00005", "")
+        # NH doesn't have an option to dump files like this, and we don't need
+        # it as of now.
+        remote_cmd = remote_cmd.replace("-a ", " ")
+        # NH doesn't allow configuring http buffer size
+        remote_cmd = remote_cmd.replace("-httpbufferkb=128", "")
+
+        # Save and strip the fortio label
+        p = re.compile("-labels([^ ]* [^ ]*)")
+        label = p.search(remote_cmd).group(1).strip()
+
+        extra_args = ""
+        # Recreate the NH equivalent of the saved label
+        extra_args = extra_args + " --output-format json"
+        # Recreate the NH equivalent of the saved label
+        extra_args = extra_args + " --label %s" % label
+        # Additionally add the "Nighthawk" label
+        extra_args = extra_args + " --label Nighthawk"
+        extra_args = extra_args + " --nighthawk-service 192.168.39.163:30554"
+        extra_args = extra_args + " "
+        remote_cmd = re.sub(p, extra_args, remote_cmd)
+
+        docker_cmd = "docker run oschaaf/nighthawk-dev:latest %s" % remote_cmd
+        print(docker_cmd, flush=True)
+        # Use a local docker instance of Nighhawk to apply load with the remote nighthawk_service
+        process = subprocess.Popen(shlex.split(
+            docker_cmd), stdout=subprocess.PIPE)
+        (output, err) = process.communicate()
+        exit_code = process.wait()
+        if exit_code == 0:
+            dest = os.path.join(os.getcwd(), "nighthawk-out-%s" % label)
+            # Store Nighthawk's native format as the fortio transform
+            # looses some information.
+            with open("%s.json" % dest, 'wb') as f:
+                f.write(output)
+            # Send human readable output to the command line
+            os.system(
+                "cat %s.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format human" % dest)
+            # Store fortio transformed output.
+            os.system("cat %s.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format fortio > %s.fortio.json" % (dest, dest))
+            # Copy the fortio json over to the pod so the fortio report server
+            # can take it from there.
+            kubectl_cp("%s.fortio.json" % dest, pod + ":" +
+                       "/var/lib/fortio/%s.fortio.json" % label, container)
+        else:
+            print("nighthawk remote execution error: %s" % exit_code)
+            if output:
+                print("--> stdout: %s" % output.decode("utf-8"))
+            if err:
+                print("--> stderr: %s" % err.decode("utf-8"))
+        return
+
     cmd = "kubectl --namespace {namespace} exec {pod} {c} -- {remote_cmd}".format(
         pod=pod,
         remote_cmd=remote_cmd,
         c=c,
         namespace=namespace)
-    print(cmd, flush=True)
     runfn(cmd)
 
 
 def rc(command):
     process = subprocess.Popen(command.split(), stdout=subprocess.PIPE)
     while True:
-        output = process.stdout.readline()
+        output = process.stdout.readline().decode("utf-8")
         if output == '' and process.poll() is not None:
             break
         if output:
@@ -298,7 +379,8 @@ def validate(job_config):
             return False
         exp_type = required_fields[k]
         if not isinstance(job_config[k], exp_type):
-            print("expecting type of parameter {} to be {}, got {}".format(k, exp_type, type(job_config[k])))
+            print("expecting type of parameter {} to be {}, got {}".format(
+                k, exp_type, type(job_config[k])))
             return False
     return True
 
@@ -329,8 +411,6 @@ def fortio_from_config_file(args):
 
 def run(args):
     min_duration = METRICS_START_SKIP_DURATION + METRICS_END_SKIP_DURATION
-    #server_pod = run_command_sync(["kubectl -n twopods get pods --sort-by='.status.containerStatuses[0].restartCount' -lapp=fortioserver -o custom-columns=NAME:.metadata.name --no-headers"])
-    #client_pod = run_command_sync(["kubectl -n twopods get pods --sort-by='.status.containerStatuses[0].restartCount' -lapp=fortioclient -o custom-columns=NAME:.metadata.name --no-headers"])    
 
     # run with config files
     if args.config_file is not None:
