@@ -41,6 +41,9 @@ spec:
   - name: grpc-pinga
     port: 8077
     protocol: TCP
+  - name: nighthawk-service
+    port: 9999
+    protocol: TCP
   selector:
     app: {{ $.name }}
 {{- if $.V.expose }}
@@ -218,12 +221,21 @@ spec:
           mountPath: /var/lib/fortio
         - name: nighthawk-test-server-config
           mountPath: /var/lib/nighthawk 
-        image: {{ $.Values.fortioImage }}
+        image: {{ $.Values.nighthawkImage }}
 {{- if eq $.name "fortioclient" }}
         args:
-        - report
+        - nighthawk_service
+        - --listen
+        - 0.0.0.0:9999
+        ports:
+        - containerPort: 9999
+          protocol: TCP
 {{- else }}
-        image: {{ $.Values.nighthawkImage }}
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        - containerPort: 8079
+          protocol: TCP
         args:
         - nighthawk_test_server
         - -c
@@ -231,11 +243,6 @@ spec:
         - --base-id
         - "1"
 {{- end }}
-        ports:
-        - containerPort: 8080
-          protocol: TCP
-        - containerPort: 8079
-          protocol: TCP
         resources:
 {{- if $.Values.appresources1 }}
 {{ toYaml $.Values.appresources1 | indent 10 }}
