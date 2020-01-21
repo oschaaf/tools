@@ -126,25 +126,25 @@ class Fortio:
             sys.exit("invalid mesh %s, must be istio or linkerd" % mesh)
 
     def nosidecar(self, fortio_cmd):
-        basestr = "http://{svc}:{port}/echo?size={size}"
+        basestr = "http://{svc}:{port}/echo"
         if self.mode == "grpc":
             basestr = "-payload-size {size} {svc}:{port}"
         return fortio_cmd + "_base " + basestr.format(
-            svc=self.server.ip, port=self.ports[self.mode]["direct_port"], size=self.size)
+            svc=self.server.ip, port=self.ports[self.mode]["direct_port"])
 
     def serversidecar(self, fortio_cmd):
-        basestr = "http://{svc}:{port}/echo?size={size}"
+        basestr = "http://{svc}:{port}/"
         if self.mode == "grpc":
             basestr = "-payload-size {size} {svc}:{port}"
         return fortio_cmd + "_serveronly " + basestr.format(
-            svc=self.server.ip, port=self.ports[self.mode]["port"], size=self.size)
+            svc=self.server.ip, port=self.ports[self.mode]["port"])
 
     def bothsidecar(self, fortio_cmd):
-        basestr = "http://{svc}:{port}/echo?size={size}"
+        basestr = "http://{svc}:{port}/"
         if self.mode == "grpc":
             basestr = "-payload-size {size} {svc}:{port}"
         return fortio_cmd + "_both " + basestr.format(
-            svc=self.server.labels["app"], port=self.ports[self.mode]["port"], size=self.size)
+            svc=self.server.labels["app"], port=self.ports[self.mode]["port"])
 
     def ingress(self, fortio_cmd):
         url = urlparse(self.run_ingress)
@@ -152,8 +152,8 @@ class Fortio:
         if url.scheme == "":
             url = urlparse("http://{svc}".format(svc=self.run_ingress))
 
-        return fortio_cmd + "_ingress {url}/echo?size={size}".format(
-            url=url.geturl(), size=self.size)
+        return fortio_cmd + "_ingress {url}/".format(
+            url=url.geturl())
 
     def run(self, conn, qps, size, duration):
         size = size or self.size
@@ -184,19 +184,19 @@ class Fortio:
             cacert_arg = "-cacert {cacert_path}".format(
                 cacert_path=self.cacert)
 
-        #process = subprocess.Popen(shlex.split("kubectl -n \"%s\" port-forward svc/fortioclient 8443:8443" %
+        # process = subprocess.Popen(shlex.split("kubectl -n \"%s\" port-forward svc/fortioclient 8443:8443" %
         #                                       os.environ.get("NAMESPACE", "twopods")), stdout=subprocess.PIPE)
-
-        fortio_cmd = (
-            "fortio load -c {conn} -qps {qps} -t {duration}s -a -r {r} {cacert_arg} {grpc} -httpbufferkb=128 " +
-            "-labels {labels}").format(
-                conn=conn,
-                qps=qps,
-                duration=duration,
-                r=self.r,
-                grpc=grpc,
-                cacert_arg=cacert_arg,
-                labels=labels)
+        duration = 2
+        # Note: Labels is the last arg, and there's stuff depending on that.
+        fortio_cmd = "nighthawk_client --output-format json --prefetch-connections --experimental-h1-connection-reuse-strategy lru --nighthawk-service {service} --label Nighthawk --connections {conn} --rps {qps} --duration {duration} {cacert_arg} {grpc} --request-header \"x-nighthawk-test-server-config: {{response_body_size:{size}}}\" --label {labels}".format(
+            conn=conn,
+            qps=qps,
+            duration=duration,
+            grpc=grpc,
+            cacert_arg=cacert_arg,
+            labels=labels,
+            size=self.size,
+            service="192.168.39.59:30707")
 
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
@@ -289,39 +289,8 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
     if container is not None:
         c = "-c " + container
 
-    # TODO: just create a different call for this
-    # TODO: clean this up
-    if "fortio load" in remote_cmd:
-        remote_cmd = remote_cmd.replace("fortio load", "nighthawk_client")
-        remote_cmd = remote_cmd.replace("-c", "--connections")
-        remote_cmd = remote_cmd.replace("-qps", "--rps")
-        remote_cmd = remote_cmd.replace("-t", "--duration")
-        # Short duration for testing
-        remote_cmd = remote_cmd.replace("93s", "2")
-        remote_cmd = remote_cmd.replace("240s", "2")
-        # We don't have a configurable bucket resolution
-        remote_cmd = remote_cmd.replace("-r 0.00005", "")
-        # NH doesn't have an option to dump files like this, and we don't need
-        # it as of now.
-        remote_cmd = remote_cmd.replace("-a ", " ")
-        # NH doesn't allow configuring http buffer size
-        remote_cmd = remote_cmd.replace("-httpbufferkb=128", "")
-
-        # Save and strip the fortio label
-        p = re.compile("-labels([^ ]* [^ ]*)")
-        label = p.search(remote_cmd).group(1).strip()
-
-        extra_args = ""
-        # Recreate the NH equivalent of the saved label
-        extra_args = extra_args + " --output-format json"
-        # Recreate the NH equivalent of the saved label
-        extra_args = extra_args + " --label %s" % label
-        # Additionally add the "Nighthawk" label
-        extra_args = extra_args + " --label Nighthawk"
-        extra_args = extra_args + " --nighthawk-service 192.168.39.163:30554"
-        extra_args = extra_args + " "
-        remote_cmd = re.sub(p, extra_args, remote_cmd)
-
+    if "nighthawk_client" in remote_cmd:
+        print(remote_cmd)
         docker_cmd = "docker run oschaaf/nighthawk-dev:latest %s" % remote_cmd
         print(docker_cmd, flush=True)
         # Use a local docker instance of Nighhawk to apply load with the remote nighthawk_service
