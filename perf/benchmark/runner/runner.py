@@ -70,8 +70,14 @@ def run_command_sync(command):
 
 
 class Fortio:
+    # TODO(oschaaf): 
+    #ports = {
+    #    "http": {"direct_port": 8077, "port": 8080},direct_port was 8077, which is grpc-pinga (??)
+    #    "grpc": {"direct_port": 8076, "port": 8079}, 
+    #    "direct_envoy": {"direct_port": 8076, "port": 8079},
+    #}
     ports = {
-        "http": {"direct_port": 8077, "port": 8080},
+        "http": {"direct_port": 8078, "port": 8080},
         "grpc": {"direct_port": 8076, "port": 8079},
         "direct_envoy": {"direct_port": 8076, "port": 8079},
     }
@@ -103,8 +109,6 @@ class Fortio:
         self.duration = duration
         self.mode = mode
         self.ns = os.environ.get("NAMESPACE", "twopods")
-        # bucket resolution in seconds
-        self.r = "0.00005"
         self.telemetry_mode = telemetry_mode
         self.perf_record = perf_record
         self.server = pod_info("-lapp=" + server, namespace=self.ns)
@@ -127,22 +131,22 @@ class Fortio:
 
     def nosidecar(self):
         basestr = "http://{svc}:{port}/"
-        if self.mode == "grpc":
-            basestr = "-payload-size {size} {svc}:{port}"
+        #if self.mode == "grpc":
+        #    basestr = "-payload-size {size} {svc}:{port}"
         return "base", basestr.format(
             svc=self.server.ip, port=self.ports[self.mode]["direct_port"])
 
     def serversidecar(self):
         basestr = "http://{svc}:{port}/"
-        if self.mode == "grpc":
-            basestr = "-payload-size {size} {svc}:{port}"
+        #if self.mode == "grpc":
+        #    basestr = "-payload-size {size} {svc}:{port}"
         return "serveronly", basestr.format(
             svc=self.server.ip, port=self.ports[self.mode]["port"])
 
     def bothsidecar(self):
         basestr = "http://{svc}:{port}/"
-        if self.mode == "grpc":
-            basestr = "-payload-size {size} {svc}:{port}"
+        #if self.mode == "grpc":
+        #    basestr = "-payload-size {size} {svc}:{port}"
         return "both", basestr.format(
             svc=self.server.labels["app"], port=self.ports[self.mode]["port"])
 
@@ -182,7 +186,7 @@ class Fortio:
         if self.cacert is not None:
             cacert_arg = "-cacert {cacert_path}".format(
                 cacert_path=self.cacert)
-        duration = 2
+        duration = 10
         # Note: Labels is the last arg, and there's stuff depending on that.
         fortio_cmd = "nighthawk_client --concurrency auto --output-format json --prefetch-connections --open-loop --experimental-h1-connection-reuse-strategy lru --nighthawk-service {service} --label Nighthawk --connections {conn} --rps {qps} --duration {duration} {cacert_arg} {grpc} --request-header \"x-nighthawk-test-server-config: {{response_body_size:{size}}}\" --label {labels}".format(
             conn=conn,
@@ -193,6 +197,11 @@ class Fortio:
             labels=labels,
             size=self.size,
             service="127.0.0.1:9999")
+
+
+        #if self.mode == "grpc":
+        #    print("hey")
+        # TODO(oschaaf): switch to h2 / set request upload size to 1k. Long running connections.
 
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
