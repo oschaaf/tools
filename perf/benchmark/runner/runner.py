@@ -125,35 +125,34 @@ class Fortio:
         else:
             sys.exit("invalid mesh %s, must be istio or linkerd" % mesh)
 
-    def nosidecar(self, fortio_cmd):
+    def nosidecar(self):
         basestr = "http://{svc}:{port}/echo"
         if self.mode == "grpc":
             basestr = "-payload-size {size} {svc}:{port}"
-        return fortio_cmd + "_base " + basestr.format(
+        return "base ", basestr.format(
             svc=self.server.ip, port=self.ports[self.mode]["direct_port"])
 
-    def serversidecar(self, fortio_cmd):
+    def serversidecar(self):
         basestr = "http://{svc}:{port}/"
         if self.mode == "grpc":
             basestr = "-payload-size {size} {svc}:{port}"
-        return fortio_cmd + "_serveronly " + basestr.format(
+        return "serveronly", basestr.format(
             svc=self.server.ip, port=self.ports[self.mode]["port"])
 
-    def bothsidecar(self, fortio_cmd):
+    def bothsidecar(self):
         basestr = "http://{svc}:{port}/"
         if self.mode == "grpc":
             basestr = "-payload-size {size} {svc}:{port}"
-        return fortio_cmd + "_both " + basestr.format(
+        return "both", basestr.format(
             svc=self.server.labels["app"], port=self.ports[self.mode]["port"])
 
-    def ingress(self, fortio_cmd):
+    def ingress(self):
         url = urlparse(self.run_ingress)
         # If scheme is not defined fallback to http
         if url.scheme == "":
             url = urlparse("http://{svc}".format(svc=self.run_ingress))
 
-        return fortio_cmd + "_ingress {url}/".format(
-            url=url.geturl())
+        return "ingress", "{url}/".format(url=url.geturl())
 
     def run(self, conn, qps, size, duration):
         size = size or self.size
@@ -196,11 +195,13 @@ class Fortio:
             cacert_arg=cacert_arg,
             labels=labels,
             size=self.size,
-            service="192.168.39.59:30707")
+            service="192.168.39.163:30859")
 
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
-            kubectl_exec(self.client.name, self.ingress(fortio_cmd))
+            mode_label, mode_url = self.ingress()
+            run_nighthawk(self.client.name, fortio_cmd + "_" +
+                          mode_label + " " + mode_url, labels + "_" + mode_label)
             if self.perf_record:
                 run_perf(
                     self.mesh,
@@ -210,7 +211,9 @@ class Fortio:
 
         if self.run_serversidecar:
             print('-------------- Running in server sidecar mode --------------')
-            kubectl_exec(self.client.name, self.serversidecar(fortio_cmd))
+            mode_label, mode_url = self.serversidecar()
+            run_nighthawk(self.client.name, fortio_cmd + "_" +
+                          mode_label + " " + mode_url, labels + "_" + mode_label)
             if self.perf_record:
                 run_perf(
                     self.mesh,
@@ -220,7 +223,9 @@ class Fortio:
 
         if self.run_bothsidecar:
             print('-------------- Running in both sidecar mode --------------')
-            kubectl_exec(self.client.name, self.bothsidecar(fortio_cmd))
+            mode_label, mode_url = self.bothsidecar()
+            run_nighthawk(self.client.name, fortio_cmd + "_" +
+                          mode_label + " " + mode_url, labels + "_" + mode_label)
             if self.perf_record:
                 run_perf(
                     self.mesh,
@@ -230,7 +235,9 @@ class Fortio:
 
         if self.run_baseline:
             print('-------------- Running in baseline mode --------------')
-            kubectl_exec(self.client.name, self.nosidecar(fortio_cmd))
+            mode_label, mode_url = self.nosidecar()
+            run_nighthawk(self.client.name, fortio_cmd + "_" +
+                          mode_label + " " + mode_url, labels + "_" + mode_label)
 
 
 PERFCMD = "/usr/lib/linux-tools/4.4.0-131-generic/perf"
@@ -283,44 +290,54 @@ def kubectl_cp(from_file, to_file, container):
     run_command_sync(cmd)
 
 
+def run_nighthawk(pod, remote_cmd, labels):
+    docker_image = "oschaaf/nighthawk-dev:latest"
+    namespace = os.environ.get("NAMESPACE", "twopods")
+
+    # TODO
+    #c = ""
+    # if container is not None:
+    #    c = "-c " + container
+
+    docker_cmd = "docker run {docker_image} {remote_cmd}".format(
+        docker_image=docker_image, remote_cmd=remote_cmd)
+    print(docker_cmd, flush=True)
+    # Use a local docker instance of Nighhawk to apply load with the remote nighthawk_service
+    process = subprocess.Popen(shlex.split(
+        docker_cmd), stdout=subprocess.PIPE)
+    (output, err) = process.communicate()
+    exit_code = process.wait()
+    if exit_code == 0:
+        dest = os.path.join(os.getcwd(), "nighthawk-out-%s" % labels)
+        # Store Nighthawk's native format as the fortio transform
+        # looses some information.
+        with open("%s.json" % dest, 'wb') as f:
+            f.write(output)
+        # Send human readable output to the command line
+        os.system(
+            "cat {path}.json | docker run -i {docker_image} nighthawk_output_transform --output-format human".format(docker_image=docker_image, path=dest))
+        # Store fortio transformed output.
+        os.system("cat {path}.json | docker run -i {docker_image} nighthawk_output_transform --output-format fortio > {path}.fortio.json".format(
+            path=dest, docker_image=docker_image))
+        # Copy the fortio json over to the pod so the fortio report server
+        # can take it from there.
+        # kubectl_cp("%s.fortio.json" % dest, pod + ":" +
+        #           "/var/lib/fortio/%s.fortio.json" % labels, container)
+        kubectl_cp("%s.fortio.json" % dest, pod + ":" +
+                   "/var/lib/fortio/%s.fortio.json" % labels, None)
+    else:
+        print("nighthawk remote execution error: %s" % exit_code)
+        if output:
+            print("--> stdout: %s" % output.decode("utf-8"))
+        if err:
+            print("--> stderr: %s" % err.decode("utf-8"))
+
+
 def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
     namespace = os.environ.get("NAMESPACE", "twopods")
     c = ""
     if container is not None:
         c = "-c " + container
-
-    if "nighthawk_client" in remote_cmd:
-        print(remote_cmd)
-        docker_cmd = "docker run oschaaf/nighthawk-dev:latest %s" % remote_cmd
-        print(docker_cmd, flush=True)
-        # Use a local docker instance of Nighhawk to apply load with the remote nighthawk_service
-        process = subprocess.Popen(shlex.split(
-            docker_cmd), stdout=subprocess.PIPE)
-        (output, err) = process.communicate()
-        exit_code = process.wait()
-        if exit_code == 0:
-            dest = os.path.join(os.getcwd(), "nighthawk-out-%s" % label)
-            # Store Nighthawk's native format as the fortio transform
-            # looses some information.
-            with open("%s.json" % dest, 'wb') as f:
-                f.write(output)
-            # Send human readable output to the command line
-            os.system(
-                "cat %s.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format human" % dest)
-            # Store fortio transformed output.
-            os.system("cat %s.json | docker run -i oschaaf/nighthawk-dev:latest nighthawk_output_transform --output-format fortio > %s.fortio.json" % (dest, dest))
-            # Copy the fortio json over to the pod so the fortio report server
-            # can take it from there.
-            kubectl_cp("%s.fortio.json" % dest, pod + ":" +
-                       "/var/lib/fortio/%s.fortio.json" % label, container)
-        else:
-            print("nighthawk remote execution error: %s" % exit_code)
-            if output:
-                print("--> stdout: %s" % output.decode("utf-8"))
-            if err:
-                print("--> stderr: %s" % err.decode("utf-8"))
-        return
-
     cmd = "kubectl --namespace {namespace} exec {pod} {c} -- {remote_cmd}".format(
         pod=pod,
         remote_cmd=remote_cmd,
