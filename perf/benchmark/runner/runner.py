@@ -78,7 +78,7 @@ class Fortio:
     #}
     ports = {
         "http": {"direct_port": 8078, "port": 8080},
-        "grpc": {"direct_port": 8076, "port": 8079},
+        "grpc": {"direct_port": 8078, "port": 8080},
         "direct_envoy": {"direct_port": 8076, "port": 8079},
     }
 
