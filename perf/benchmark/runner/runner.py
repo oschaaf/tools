@@ -180,13 +180,15 @@ class Fortio:
 
         grpc = ""
         if self.mode == "grpc":
-            grpc = "-grpc -ping"
+            grpc = "--h2 "
+            if self.size:
+                grpc = "--request-header \"content-length: {size}\"".format(size=self.size)
 
         cacert_arg = ""
         if self.cacert is not None:
             cacert_arg = "-cacert {cacert_path}".format(
                 cacert_path=self.cacert)
-        duration = 10
+        duration = 1
         # Note: Labels is the last arg, and there's stuff depending on that.
         fortio_cmd = "nighthawk_client --concurrency auto --output-format json --prefetch-connections --open-loop --experimental-h1-connection-reuse-strategy lru --nighthawk-service {service} --label Nighthawk --connections {conn} --rps {qps} --duration {duration} {cacert_arg} {grpc} --request-header \"x-nighthawk-test-server-config: {{response_body_size:{size}}}\" --label {labels}".format(
             conn=conn,
@@ -197,11 +199,6 @@ class Fortio:
             labels=labels,
             size=self.size,
             service="127.0.0.1:9999")
-
-
-        #if self.mode == "grpc":
-        #    print("hey")
-        # TODO(oschaaf): switch to h2 / set request upload size to 1k. Long running connections.
 
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
