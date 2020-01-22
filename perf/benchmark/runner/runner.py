@@ -126,10 +126,10 @@ class Fortio:
             sys.exit("invalid mesh %s, must be istio or linkerd" % mesh)
 
     def nosidecar(self):
-        basestr = "http://{svc}:{port}/echo"
+        basestr = "http://{svc}:{port}/"
         if self.mode == "grpc":
             basestr = "-payload-size {size} {svc}:{port}"
-        return "base ", basestr.format(
+        return "base", basestr.format(
             svc=self.server.ip, port=self.ports[self.mode]["direct_port"])
 
     def serversidecar(self):
@@ -182,12 +182,9 @@ class Fortio:
         if self.cacert is not None:
             cacert_arg = "-cacert {cacert_path}".format(
                 cacert_path=self.cacert)
-
-        # process = subprocess.Popen(shlex.split("kubectl -n \"%s\" port-forward svc/fortioclient 8443:8443" %
-        #                                       os.environ.get("NAMESPACE", "twopods")), stdout=subprocess.PIPE)
         duration = 2
         # Note: Labels is the last arg, and there's stuff depending on that.
-        fortio_cmd = "nighthawk_client --output-format json --prefetch-connections --experimental-h1-connection-reuse-strategy lru --nighthawk-service {service} --label Nighthawk --connections {conn} --rps {qps} --duration {duration} {cacert_arg} {grpc} --request-header \"x-nighthawk-test-server-config: {{response_body_size:{size}}}\" --label {labels}".format(
+        fortio_cmd = "nighthawk_client --concurrency auto --output-format json --prefetch-connections --open-loop --experimental-h1-connection-reuse-strategy lru --nighthawk-service {service} --label Nighthawk --connections {conn} --rps {qps} --duration {duration} {cacert_arg} {grpc} --request-header \"x-nighthawk-test-server-config: {{response_body_size:{size}}}\" --label {labels}".format(
             conn=conn,
             qps=qps,
             duration=duration,
@@ -195,7 +192,7 @@ class Fortio:
             cacert_arg=cacert_arg,
             labels=labels,
             size=self.size,
-            service="192.168.39.163:30859")
+            service="127.0.0.1:9999")
 
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
@@ -293,13 +290,7 @@ def kubectl_cp(from_file, to_file, container):
 def run_nighthawk(pod, remote_cmd, labels):
     docker_image = "oschaaf/nighthawk-dev:latest"
     namespace = os.environ.get("NAMESPACE", "twopods")
-
-    # TODO
-    #c = ""
-    # if container is not None:
-    #    c = "-c " + container
-
-    docker_cmd = "docker run {docker_image} {remote_cmd}".format(
+    docker_cmd = "docker run --network=host {docker_image} {remote_cmd}".format(
         docker_image=docker_image, remote_cmd=remote_cmd)
     print(docker_cmd, flush=True)
     # Use a local docker instance of Nighhawk to apply load with the remote nighthawk_service
@@ -423,11 +414,15 @@ def run(args):
             min_duration=min_duration))
         exit(1)
 
-    for conn in fortio.conn:
-        for qps in fortio.qps:
-            fortio.run(conn=conn, qps=qps,
-                       duration=fortio.duration, size=fortio.size)
-
+    process = subprocess.Popen(shlex.split("kubectl -n \"%s\" port-forward svc/fortioclient 9999:9999" %
+                                            os.environ.get("NAMESPACE", "twopods")), stdout=subprocess.PIPE)
+    try:
+        for conn in fortio.conn:
+            for qps in fortio.qps:
+                fortio.run(conn=conn, qps=qps,
+                        duration=fortio.duration, size=fortio.size)
+    finally:
+        process.kill()
 
 def csv_to_int(s):
     return [int(i) for i in s.split(",")]
