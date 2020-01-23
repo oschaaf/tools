@@ -77,8 +77,8 @@ class Fortio:
     #    "direct_envoy": {"direct_port": 8076, "port": 8079},
     #}
     ports = {
-        "http": {"direct_port": 8078, "port": 8080},
-        "grpc": {"direct_port": 8077, "port": 8079},
+        "http": {"direct_port": 8077, "port": 8080},
+        "grpc": {"direct_port": 8076, "port": 8079},
         "direct_envoy": {"direct_port": 8076, "port": 8079},
     }
 
@@ -98,6 +98,7 @@ class Fortio:
             extra_labels=None,
             baseline=False,
             serversidecar=False,
+            clientsidecar=False,
             bothsidecar=True,
             ingress=None,
             mesh="istio",
@@ -118,6 +119,7 @@ class Fortio:
         self.extra_labels = extra_labels
         self.run_baseline = baseline
         self.run_serversidecar = serversidecar
+        self.run_clientsidecar = clientsidecar
         self.run_bothsidecar = bothsidecar
         self.run_ingress = ingress
         self.cacert = cacert
@@ -143,6 +145,13 @@ class Fortio:
         return "serveronly", basestr.format(
             svc=self.server.ip, port=self.ports[self.mode]["port"])
 
+    def clientsidecar(self, fortio_cmd):
+        basestr = "http://{svc}:{port}/"
+        #if self.mode == "grpc":
+        #    basestr = "-payload-size {size} {svc}:{port}"
+        return "base", basestr.format(
+            svc=self.server.ip, port=self.ports[self.mode]["direct_port"])
+
     def bothsidecar(self):
         basestr = "http://{svc}:{port}/"
         #if self.mode == "grpc":
@@ -150,7 +159,7 @@ class Fortio:
         return "both", basestr.format(
             svc=self.server.labels["app"], port=self.ports[self.mode]["port"])
 
-    def ingress(self):
+    def ingress(self, fortio_cmd):
         url = urlparse(self.run_ingress)
         # If scheme is not defined fallback to http
         if url.scheme == "":
@@ -188,7 +197,7 @@ class Fortio:
         if self.cacert is not None:
             cacert_arg = "-cacert {cacert_path}".format(
                 cacert_path=self.cacert)
-        # duration = 1
+        duration = 1
         # Note: Labels is the last arg, and there's stuff depending on that.
         fortio_cmd = "nighthawk_client --concurrency auto --output-format json --prefetch-connections --open-loop --experimental-h1-connection-reuse-strategy lru --nighthawk-service {service} --label Nighthawk --connections {conn} --rps {qps} --duration {duration} {cacert_arg} {grpc} --request-header \"x-nighthawk-test-server-config: {{response_body_size:{size}}}\" --label {labels}".format(
             conn=conn,
@@ -222,6 +231,17 @@ class Fortio:
                     self.mesh,
                     self.server.name,
                     labels + "_srv_serveronly",
+                    duration=40)
+
+        if self.run_clientsidecar:
+            print('-------------- Running in client sidecar mode --------------')
+            run_nighthawk(self.client.name, fortio_cmd + "_" +
+                          mode_label + " " + mode_url, labels + "_" + mode_label)
+            if self.perf_record:
+                run_perf(
+                    self.mesh,
+                    self.client.name,
+                    labels + "_srv_clientonly",
                     duration=40)
 
         if self.run_bothsidecar:
@@ -383,6 +403,7 @@ def fortio_from_config_file(args):
         fortio.size = job_config.get('size', 1024)
         fortio.perf_record = job_config.get('perf_record', False)
         fortio.run_serversidecar = job_config.get('run_serversidecar', False)
+        fortio.run_clientsidecar = job_config.get('run_clientsidecar', False)
         fortio.run_bothsidecar = job_config.get('run_bothsidecar', False)
         fortio.run_baseline = job_config.get('run_baseline', True)
         fortio.mesh = job_config.get('mesh', 'istio')
@@ -408,6 +429,7 @@ def run(args):
             extra_labels=args.extra_labels,
             baseline=args.baseline,
             serversidecar=args.serversidecar,
+            clientsidecar=args.clientsidecar,
             bothsidecar=args.bothsidecar,
             ingress=args.ingress,
             mode=args.mode,
@@ -497,6 +519,8 @@ def get_parser():
     define_bool(parser, "baseline", "run baseline for all", False)
     define_bool(parser, "serversidecar",
                 "run serversidecar-only for all", False)
+    define_bool(parser, "clientsidecar",
+                "run clientsidecar-only for all", False)
     define_bool(parser, "bothsidecar",
                 "run clientsiecar and serversidecar for all", True)
 
