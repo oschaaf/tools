@@ -177,7 +177,7 @@ class Fortio:
         if self.mode == "grpc":
             grpc = "--h2 "
             if self.size:
-                grpc = "--request-header \"content-length: {size}\"".format(size=self.size)
+                grpc = "{grpc} --request-header \"content-length: {size}\" ".format(grpc=grpc, size=self.size)
 
         cacert_arg = ""
         if self.cacert is not None:
