@@ -296,17 +296,13 @@ def run_perf(mesh, pod, labels, duration=20):
 
 
 def kubectl_cp(from_file, to_file, container):
-    if not container:
-        cmd = "kubectl --namespace {namespace} cp {from_file} {to_file}".format(
-            namespace=NAMESPACE,
-            from_file=from_file,
-            to_file=to_file)
-    else:
-        cmd = "kubectl --namespace {namespace} cp {from_file} {to_file} -c {container}".format(
-            namespace=NAMESPACE,
-            from_file=from_file,
-            to_file=to_file,
-            container=container)
+    namespace = os.environ.get("NAMESPACE", "twopods")
+    cmd = "kubectl --namespace {namespace} cp {from_file} {to_file} -c {container}".format(
+        namespace=namespace,
+        from_file=from_file,
+        to_file=to_file,
+        container=container)
+    print(cmd, flush=True)
     run_command_sync(cmd)
 
 
