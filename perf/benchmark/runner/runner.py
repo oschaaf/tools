@@ -78,7 +78,7 @@ class Fortio:
     #}
     ports = {
         "http": {"direct_port": 8078, "port": 8080},
-        "grpc": {"direct_port": 8078, "port": 8080},
+        "grpc": {"direct_port": 8077, "port": 8079},
         "direct_envoy": {"direct_port": 8076, "port": 8079},
     }
 
@@ -188,7 +188,7 @@ class Fortio:
         if self.cacert is not None:
             cacert_arg = "-cacert {cacert_path}".format(
                 cacert_path=self.cacert)
-        duration = 1
+        # duration = 1
         # Note: Labels is the last arg, and there's stuff depending on that.
         fortio_cmd = "nighthawk_client --concurrency auto --output-format json --prefetch-connections --open-loop --experimental-h1-connection-reuse-strategy lru --nighthawk-service {service} --label Nighthawk --connections {conn} --rps {qps} --duration {duration} {cacert_arg} {grpc} --request-header \"x-nighthawk-test-server-config: {{response_body_size:{size}}}\" --label {labels}".format(
             conn=conn,
@@ -294,7 +294,7 @@ def kubectl_cp(from_file, to_file, container):
 
 
 def run_nighthawk(pod, remote_cmd, labels):
-    docker_image = "oschaaf/nighthawk-dev:latest"
+    docker_image = "envoyproxy/nighthawk-dev:latest"
     namespace = os.environ.get("NAMESPACE", "twopods")
     docker_cmd = "docker run --network=host {docker_image} {remote_cmd}".format(
         docker_image=docker_image, remote_cmd=remote_cmd)
