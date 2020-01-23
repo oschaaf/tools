@@ -70,12 +70,6 @@ def run_command_sync(command):
 
 
 class Fortio:
-    # TODO(oschaaf): 
-    #ports = {
-    #    "http": {"direct_port": 8077, "port": 8080},direct_port was 8077, which is grpc-pinga (??)
-    #    "grpc": {"direct_port": 8076, "port": 8079}, 
-    #    "direct_envoy": {"direct_port": 8076, "port": 8079},
-    #}
     ports = {
         "http": {"direct_port": 8077, "port": 8080},
         "grpc": {"direct_port": 8076, "port": 8079},
