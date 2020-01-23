@@ -36,30 +36,22 @@ POD = collections.namedtuple('Pod', ['name', 'namespace', 'ip', 'labels'])
 NIGHTHAWK_DOCKER_IMAGE = "envoyproxy/nighthawk-dev:latest"
 
 
-def pod_info(filterstr="", namespace=NAMESPACE, multi_ok=True):
-    max_attempts = 30
-    while max_attempts > 0:
-        cmd = "kubectl -n {namespace} get pod {filterstr}  -o json".format(
-            namespace=namespace, filterstr=filterstr)
-        op = getoutput(cmd)
-        o = json.loads(op)
-        items = o['items']
+def pod_info(filterstr="", namespace=os.environ.get("NAMESPACE", "twopods"), multi_ok=True):
+    cmd = "kubectl -n {namespace} get pod {filterstr}  -o json".format(
+        namespace=namespace, filterstr=filterstr)
+    op = getoutput(cmd)
+    o = json.loads(op)
+    items = o['items']
 
-        if not multi_ok and len(items) > 1:
-            raise Exception("more than one found " + op)
+    if not multi_ok and len(items) > 1:
+        raise Exception("more than one found " + op)
 
-        if not items:
-            raise Exception("no pods found with command [" + cmd + "]")
+    if not items:
+        raise Exception("no pods found with command [" + cmd + "]")
 
-        i = items[0]
-        if not 'podIP' in i['status']:
-            time.sleep(1)
-            max_attempts = max_attempts - 1
-            continue
-        return POD(i['metadata']['name'], i['metadata']['namespace'],
-                   i['status']['podIP'], i['metadata']['labels'])
-    print("Timeout waiting for pod IP")
-
+    i = items[0]
+    return POD(i['metadata']['name'], i['metadata']['namespace'],
+               i['status']['podIP'], i['metadata']['labels'])
 
 def run_command(command):
     process = subprocess.Popen(shlex.split(command))
