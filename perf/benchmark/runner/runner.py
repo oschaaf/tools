@@ -23,12 +23,14 @@ import shlex
 import uuid
 import re
 import sys
+import tempfile
 import time
 from subprocess import getoutput
 from urllib.parse import urlparse
 import yaml
 from fortio import METRICS_START_SKIP_DURATION, METRICS_END_SKIP_DURATION
 
+NIGHTHAWK_GRPC_SERVICE_PORTMAP = 9999
 
 POD = collections.namedtuple('Pod', ['name', 'namespace', 'ip', 'labels'])
 
@@ -95,8 +97,7 @@ class Fortio:
             clientsidecar=False,
             bothsidecar=True,
             ingress=None,
-            mesh="istio",
-            cacert=None):
+            mesh="istio"):
         self.run_id = str(uuid.uuid4()).partition('-')[0]
         self.conn = conn
         self.qps = qps
@@ -116,7 +117,6 @@ class Fortio:
         self.run_clientsidecar = clientsidecar
         self.run_bothsidecar = bothsidecar
         self.run_ingress = ingress
-        self.cacert = cacert
 
         if mesh == "linkerd":
             self.mesh = "linkerd"
@@ -182,21 +182,16 @@ class Fortio:
             if self.size:
                 grpc = "{grpc} --request-header \"content-length: {size}\" ".format(grpc=grpc, size=self.size)
 
-        cacert_arg = ""
-        if self.cacert is not None:
-            cacert_arg = "-cacert {cacert_path}".format(
-                cacert_path=self.cacert)
         duration = 1
         # Note: Labels is the last arg, and there's stuff depending on that.
-        fortio_cmd = "nighthawk_client --concurrency auto --output-format json --prefetch-connections --open-loop --experimental-h1-connection-reuse-strategy lru --nighthawk-service {service} --label Nighthawk --connections {conn} --rps {qps} --duration {duration} {cacert_arg} {grpc} --request-header \"x-nighthawk-test-server-config: {{response_body_size:{size}}}\" --label {labels}".format(
+        fortio_cmd = "nighthawk_client --concurrency auto --output-format json --prefetch-connections --open-loop --experimental-h1-connection-reuse-strategy lru --nighthawk-service {service} --label Nighthawk --connections {conn} --rps {qps} --duration {duration} {grpc} --request-header \"x-nighthawk-test-server-config: {{response_body_size:{size}}}\" --label {labels}".format(
             conn=conn,
             qps=qps,
             duration=duration,
             grpc=grpc,
-            cacert_arg=cacert_arg,
             labels=labels,
             size=self.size,
-            service="127.0.0.1:9999")
+            service="127.0.0.1:{port}".format(port=NIGHTHAWK_GRPC_SERVICE_PORTMAP))
 
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
@@ -251,6 +246,7 @@ class Fortio:
             run_nighthawk(self.client.name, fortio_cmd + "_" +
                           mode_label + " " + mode_url, labels + "_" + mode_label)
 
+        print("Completed run_id {id}".format(id = self.run_id))
 
 PERFCMD = "/usr/lib/linux-tools/4.4.0-131-generic/perf"
 FLAMESH = "flame.sh"
@@ -312,23 +308,20 @@ def run_nighthawk(pod, remote_cmd, labels):
     (output, err) = process.communicate()
     exit_code = process.wait()
     if exit_code == 0:
-        dest = os.path.join(os.getcwd(), "nighthawk-out-%s" % labels)
-        # Store Nighthawk's native format as the fortio transform
-        # looses some information.
-        with open("%s.json" % dest, 'wb') as f:
-            f.write(output)
-        # Send human readable output to the command line
-        os.system(
-            "cat {path}.json | docker run -i {docker_image} nighthawk_output_transform --output-format human".format(docker_image=docker_image, path=dest))
-        # Store fortio transformed output.
-        os.system("cat {path}.json | docker run -i {docker_image} nighthawk_output_transform --output-format fortio > {path}.fortio.json".format(
-            path=dest, docker_image=docker_image))
-        # Copy the fortio json over to the pod so the fortio report server
-        # can take it from there.
-        # kubectl_cp("%s.fortio.json" % dest, pod + ":" +
-        #           "/var/lib/fortio/%s.fortio.json" % labels, container)
-        kubectl_cp("%s.fortio.json" % dest, pod + ":" +
-                   "/var/lib/fortio/%s.fortio.json" % labels, None)
+        with tempfile.NamedTemporaryFile(dir='/tmp', delete=True) as tmpfile:
+            dest = tmpfile.name      
+            # Store Nighthawk's native format as the fortio transform looses some information.
+            with open("%s.json" % dest, 'wb') as f:
+                f.write(output)
+            print("Dumped Nighthawk's json to {dest}".format(dest=dest))
+            # Send human readable output to the command line
+            os.system(
+                "cat {dest}.json | docker run -i {docker_image} nighthawk_output_transform --output-format human".format(docker_image=docker_image, dest=dest))
+            # Store fortio transformed output.
+            os.system("cat {dest}.json | docker run -i {docker_image} nighthawk_output_transform --output-format fortio > {dest}.fortio.json".format(
+                dest=dest, docker_image=docker_image))
+            # Copy the fortio json over to the for the fortio report server.
+            kubectl_cp("{dest}.fortio.json".format(dest=dest), "{pod}:/var/lib/fortio/{labels}.fortio.json".format(pod=pod, labels=labels), "shell")
     else:
         print("nighthawk remote execution error: %s" % exit_code)
         if output:
@@ -420,16 +413,18 @@ def run(args):
             ingress=args.ingress,
             mode=args.mode,
             mesh=args.mesh,
-            telemetry_mode=args.telemetry_mode,
-            cacert=args.cacert)
+            telemetry_mode=args.telemetry_mode)
 
     if fortio.duration <= min_duration:
         print("Duration must be greater than {min_duration}".format(
             min_duration=min_duration))
         exit(1)
 
-    process = subprocess.Popen(shlex.split("kubectl -n \"%s\" port-forward svc/fortioclient 9999:9999" %
-                                            os.environ.get("NAMESPACE", "twopods")), stdout=subprocess.PIPE)
+    popen_cmd = "kubectl -n \"{ns}\" port-forward svc/fortioclient {port}:9999".format(
+        ns=os.environ.get("NAMESPACE", "twopods"), 
+        port=NIGHTHAWK_GRPC_SERVICE_PORTMAP)
+    process = subprocess.Popen(shlex.split(popen_cmd), stdout=subprocess.PIPE)
+
     try:
         for conn in fortio.conn:
             for qps in fortio.qps:
@@ -496,10 +491,6 @@ def get_parser():
     parser.add_argument(
         "--config_file",
         help="config yaml file",
-        default=None)
-    parser.add_argument(
-        "--cacert",
-        help="path to the cacert for the fortio client inside the container",
         default=None)
 
     define_bool(parser, "baseline", "run baseline for all", False)
