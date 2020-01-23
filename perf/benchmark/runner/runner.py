@@ -30,12 +30,11 @@ from urllib.parse import urlparse
 import yaml
 from fortio import METRICS_START_SKIP_DURATION, METRICS_END_SKIP_DURATION
 
+NAMESPACE = os.environ.get("NAMESPACE", "twopods")
 NIGHTHAWK_GRPC_SERVICE_PORTMAP = 9999
-
 POD = collections.namedtuple('Pod', ['name', 'namespace', 'ip', 'labels'])
 
-
-def pod_info(filterstr="", namespace=os.environ.get("NAMESPACE", "twopods"), multi_ok=True):
+def pod_info(filterstr="", namespace=NAMESPACE, multi_ok=True):
     max_attempts = 30
     while max_attempts > 0:
         cmd = "kubectl -n {namespace} get pod {filterstr}  -o json".format(
@@ -104,7 +103,7 @@ class Fortio:
         self.size = size
         self.duration = duration
         self.mode = mode
-        self.ns = os.environ.get("NAMESPACE", "twopods")
+        self.ns = NAMESPACE
         self.telemetry_mode = telemetry_mode
         self.perf_record = perf_record
         self.server = pod_info("-lapp=" + server, namespace=self.ns)
@@ -303,15 +302,14 @@ def run_perf(mesh, pod, labels, duration=20):
 
 
 def kubectl_cp(from_file, to_file, container):
-    namespace = os.environ.get("NAMESPACE", "twopods")
     if not container:
         cmd = "kubectl --namespace {namespace} cp {from_file} {to_file}".format(
-            namespace=namespace,
+            namespace=NAMESPACE,
             from_file=from_file,
             to_file=to_file)
     else:
         cmd = "kubectl --namespace {namespace} cp {from_file} {to_file} -c {container}".format(
-            namespace=namespace,
+            namespace=NAMESPACE,
             from_file=from_file,
             to_file=to_file,
             container=container)
@@ -320,14 +318,14 @@ def kubectl_cp(from_file, to_file, container):
 
 def run_nighthawk(pod, remote_cmd, labels):
     docker_image = "envoyproxy/nighthawk-dev:latest"
-    namespace = os.environ.get("NAMESPACE", "twopods")
     docker_cmd = "docker run --network=host {docker_image} {remote_cmd}".format(
         docker_image=docker_image, remote_cmd=remote_cmd)
     print(docker_cmd, flush=True)
-    # Use a local docker instance of Nighhawk to apply load with the remote nighthawk_service
+    # Use a local docker instance of Nighthawk to control nighthawk_service running in the pod.
     process = subprocess.Popen(shlex.split(docker_cmd), stdout=subprocess.PIPE)
     (output, err) = process.communicate()
     exit_code = process.wait()
+
     if exit_code == 0:
         with tempfile.NamedTemporaryFile(dir='/tmp', delete=True) as tmpfile:
             dest = tmpfile.name      
@@ -352,7 +350,6 @@ def run_nighthawk(pod, remote_cmd, labels):
 
 
 def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
-    namespace = os.environ.get("NAMESPACE", "twopods")
     c = ""
     if container is not None:
         c = "-c " + container
@@ -360,7 +357,7 @@ def kubectl_exec(pod, remote_cmd, runfn=run_command, container=None):
         pod=pod,
         remote_cmd=remote_cmd,
         c=c,
-        namespace=namespace)
+        namespace=NAMESPACE)
     runfn(cmd)
 
 
@@ -443,7 +440,7 @@ def run(args):
 
     # Create a portmapping so we can access nighthawk_service.
     popen_cmd = "kubectl -n \"{ns}\" port-forward svc/fortioclient {port}:9999".format(
-        ns=os.environ.get("NAMESPACE", "twopods"), 
+        ns=NAMESPACE, 
         port=NIGHTHAWK_GRPC_SERVICE_PORTMAP)
     process = subprocess.Popen(shlex.split(popen_cmd), stdout=subprocess.PIPE)
 
