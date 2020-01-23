@@ -33,6 +33,8 @@ from fortio import METRICS_START_SKIP_DURATION, METRICS_END_SKIP_DURATION
 NAMESPACE = os.environ.get("NAMESPACE", "twopods")
 NIGHTHAWK_GRPC_SERVICE_PORTMAP = 9999
 POD = collections.namedtuple('Pod', ['name', 'namespace', 'ip', 'labels'])
+NIGHTHAWK_DOCKER_IMAGE = "envoyproxy/nighthawk-dev:latest"
+
 
 def pod_info(filterstr="", namespace=NAMESPACE, multi_ok=True):
     max_attempts = 30
@@ -317,11 +319,11 @@ def kubectl_cp(from_file, to_file, container):
 
 
 def run_nighthawk(pod, remote_cmd, labels):
-    docker_image = "envoyproxy/nighthawk-dev:latest"
+    # Use a local docker instance of Nighthawk to control nighthawk_service running in the pod
+    # and run transforms on the output we get.
     docker_cmd = "docker run --network=host {docker_image} {remote_cmd}".format(
-        docker_image=docker_image, remote_cmd=remote_cmd)
+        docker_image=NIGHTHAWK_DOCKER_IMAGE, remote_cmd=remote_cmd)
     print(docker_cmd, flush=True)
-    # Use a local docker instance of Nighthawk to control nighthawk_service running in the pod.
     process = subprocess.Popen(shlex.split(docker_cmd), stdout=subprocess.PIPE)
     (output, err) = process.communicate()
     exit_code = process.wait()
@@ -329,17 +331,17 @@ def run_nighthawk(pod, remote_cmd, labels):
     if exit_code == 0:
         with tempfile.NamedTemporaryFile(dir='/tmp', delete=True) as tmpfile:
             dest = tmpfile.name      
-            # Store Nighthawk's native format as the fortio transform looses some information.
             with open("%s.json" % dest, 'wb') as f:
                 f.write(output)
             print("Dumped Nighthawk's json to {dest}".format(dest=dest))
-            # Send human readable output to the command line
+
+            # Send human readable output to the command line.
             os.system(
-                "cat {dest}.json | docker run -i {docker_image} nighthawk_output_transform --output-format human".format(docker_image=docker_image, dest=dest))
-            # Store fortio transformed output.
+                "cat {dest}.json | docker run -i {docker_image} nighthawk_output_transform --output-format human".format(docker_image=NIGHTHAWK_DOCKER_IMAGE, dest=dest))
+            # Transform to Fortio's reporting server json format
             os.system("cat {dest}.json | docker run -i {docker_image} nighthawk_output_transform --output-format fortio > {dest}.fortio.json".format(
-                dest=dest, docker_image=docker_image))
-            # Copy the fortio json over to the for the fortio report server.
+                dest=dest, docker_image=NIGHTHAWK_DOCKER_IMAGE))
+            # Copy to the Fortio report server data directory.
             kubectl_cp("{dest}.fortio.json".format(dest=dest), "{pod}:/var/lib/fortio/{labels}.fortio.json".format(pod=pod, labels=labels), "shell")
     else:
         print("nighthawk remote execution error: %s" % exit_code)
