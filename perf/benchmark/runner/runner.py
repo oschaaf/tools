@@ -133,29 +133,21 @@ class Fortio:
 
     def nosidecar(self):
         basestr = "http://{svc}:{port}/"
-        #if self.mode == "grpc":
-        #    basestr = "-payload-size {size} {svc}:{port}"
         return "base", basestr.format(
             svc=self.server.ip, port=self.ports[self.mode]["direct_port"])
 
     def serversidecar(self):
         basestr = "http://{svc}:{port}/"
-        #if self.mode == "grpc":
-        #    basestr = "-payload-size {size} {svc}:{port}"
         return "serveronly", basestr.format(
             svc=self.server.ip, port=self.ports[self.mode]["port"])
 
     def clientsidecar(self, fortio_cmd):
         basestr = "http://{svc}:{port}/"
-        #if self.mode == "grpc":
-        #    basestr = "-payload-size {size} {svc}:{port}"
         return "base", basestr.format(
             svc=self.server.ip, port=self.ports[self.mode]["direct_port"])
 
     def bothsidecar(self):
         basestr = "http://{svc}:{port}/"
-        #if self.mode == "grpc":
-        #    basestr = "-payload-size {size} {svc}:{port}"
         return "both", basestr.format(
             svc=self.server.labels["app"], port=self.ports[self.mode]["port"])
 
@@ -291,8 +283,7 @@ def run_perf(mesh, pod, labels, duration=20):
             duration=duration),
         container=mesh + "-proxy")
 
-    kubectl_cp(pod + ":" + filepath + ".perf", LOCAL_FLAMEOUTPUT +
-               filename + ".perf", mesh + "-proxy")
+    kubectl_cp(pod + ":" + filepath + ".perf", LOCAL_FLAMEOUTPUT + filename + ".perf", mesh + "-proxy")
     run_command_sync(LOCAL_FLAMEPATH + " " + filename + ".perf")
 
 
@@ -309,7 +300,6 @@ def kubectl_cp(from_file, to_file, container):
             from_file=from_file,
             to_file=to_file,
             container=container)
-    print(cmd, flush=True)
     run_command_sync(cmd)
 
 
@@ -382,8 +372,7 @@ def validate(job_config):
             return False
         exp_type = required_fields[k]
         if not isinstance(job_config[k], exp_type):
-            print("expecting type of parameter {} to be {}, got {}".format(
-                k, exp_type, type(job_config[k])))
+            print("expecting type of parameter {} to be {}, got {}".format(k, exp_type, type(job_config[k])))
             return False
     return True
 
