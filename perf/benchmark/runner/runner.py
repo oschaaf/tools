@@ -138,7 +138,7 @@ class Fortio:
         return "serveronly", basestr.format(
             svc=self.server.ip, port=self.ports[self.mode]["port"], protocol=self.get_protocol_uri_fragment())
 
-    def clientsidecar(self, fortio_cmd):
+    def clientsidecar(self, nighthawk_cmd):
         basestr = "{protocol}://{svc}:{port}/"
         return "base", basestr.format(
             svc=self.server.ip, port=self.ports[self.mode]["direct_port"], protocol=self.get_protocol_uri_fragment())
@@ -148,7 +148,7 @@ class Fortio:
         return "both", basestr.format(
             svc=self.server.labels["app"], port=self.ports[self.mode]["port"], protocol=self.get_protocol_uri_fragment())
 
-    def ingress(self, fortio_cmd):
+    def ingress(self, nighthawk_cmd):
         url = urlparse(self.run_ingress)
         # If scheme is not defined fallback to http
         if url.scheme == "":
@@ -176,27 +176,49 @@ class Fortio:
         if self.extra_labels is not None:
             labels += "_" + self.extra_labels
 
-        grpc = ""
-        if self.mode == "grpc":
-            grpc = "--h2 "
-            if self.size:
-                grpc = "{grpc} --request-header \"content-length: {size}\" ".format(grpc=grpc, size=self.size)
-
+        # TODO(oschaaf): For test, remove
         duration = 1
+        
         # Note: Labels is the last arg, and there's stuff depending on that.
-        fortio_cmd = "nighthawk_client --concurrency auto --output-format json --prefetch-connections --open-loop --experimental-h1-connection-reuse-strategy lru --nighthawk-service {service} --label Nighthawk --connections {conn} --rps {qps} --duration {duration} {grpc} --request-header \"x-nighthawk-test-server-config: {{response_body_size:{size}}}\" --label {labels}".format(
+        # watch out when moving it.
+        nighthawk_args = [
+            "nighthawk_client", 
+            "--concurrency auto",
+            "--output-format json",
+            "--prefetch-connections",
+            "--open-loop",
+            "--experimental-h1-connection-reuse-strategy lru",
+            "--experimental-h2-use-multiple-connections",
+            "--nighthawk-service 127.0.0.1:{portmap}",
+            "--label Nighthawk",
+            "--connections {conn}",
+            "--rps {qps}",
+            "--duration {duration}",
+            "--request-header \"x-nighthawk-test-server-config: {{response_body_size:{size}}}\"",
+            "--label {labels}"
+        ]
+
+        # Our "gRPC" mode actually means:
+        #  - h2 
+        #  - with long running connections
+        #  - Also transfer request body sized according to "size".
+        if self.mode == "grpc":
+            nighthawk_args.append("--h2")
+            if self.size:
+                nighthawk_args.append("--request-header \"content-length: {size}\"")
+
+        nighthawk_cmd = " ".join(nighthawk_args).format(
             conn=conn,
             qps=qps,
             duration=duration,
-            grpc=grpc,
             labels=labels,
             size=self.size,
-            service="127.0.0.1:{port}".format(port=NIGHTHAWK_GRPC_SERVICE_PORTMAP))
+            portmap=NIGHTHAWK_GRPC_SERVICE_PORTMAP)
 
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
             mode_label, mode_url = self.ingress()
-            run_nighthawk(self.client.name, fortio_cmd + "_" +
+            run_nighthawk(self.client.name, nighthawk_cmd + "_" +
                           mode_label + " " + mode_url, labels + "_" + mode_label)
             if self.perf_record:
                 run_perf(
@@ -208,7 +230,7 @@ class Fortio:
         if self.run_serversidecar:
             print('-------------- Running in server sidecar mode --------------')
             mode_label, mode_url = self.serversidecar()
-            run_nighthawk(self.client.name, fortio_cmd + "_" +
+            run_nighthawk(self.client.name, nighthawk_cmd + "_" +
                           mode_label + " " + mode_url, labels + "_" + mode_label)
             if self.perf_record:
                 run_perf(
@@ -219,7 +241,7 @@ class Fortio:
 
         if self.run_clientsidecar:
             print('-------------- Running in client sidecar mode --------------')
-            run_nighthawk(self.client.name, fortio_cmd + "_" +
+            run_nighthawk(self.client.name, nighthawk_cmd + "_" +
                           mode_label + " " + mode_url, labels + "_" + mode_label)
             if self.perf_record:
                 run_perf(
@@ -231,7 +253,7 @@ class Fortio:
         if self.run_bothsidecar:
             print('-------------- Running in both sidecar mode --------------')
             mode_label, mode_url = self.bothsidecar()
-            run_nighthawk(self.client.name, fortio_cmd + "_" +
+            run_nighthawk(self.client.name, nighthawk_cmd + "_" +
                           mode_label + " " + mode_url, labels + "_" + mode_label)
             if self.perf_record:
                 run_perf(
@@ -243,7 +265,7 @@ class Fortio:
         if self.run_baseline:
             print('-------------- Running in baseline mode --------------')
             mode_label, mode_url = self.nosidecar()
-            run_nighthawk(self.client.name, fortio_cmd + "_" +
+            run_nighthawk(self.client.name, nighthawk_cmd + "_" +
                           mode_label + " " + mode_url, labels + "_" + mode_label)
 
         print("Completed run_id {id}".format(id = self.run_id))
