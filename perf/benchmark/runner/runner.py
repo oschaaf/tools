@@ -325,8 +325,7 @@ def run_nighthawk(pod, remote_cmd, labels):
         docker_image=docker_image, remote_cmd=remote_cmd)
     print(docker_cmd, flush=True)
     # Use a local docker instance of Nighhawk to apply load with the remote nighthawk_service
-    process = subprocess.Popen(shlex.split(
-        docker_cmd), stdout=subprocess.PIPE)
+    process = subprocess.Popen(shlex.split(docker_cmd), stdout=subprocess.PIPE)
     (output, err) = process.communicate()
     exit_code = process.wait()
     if exit_code == 0:
@@ -442,6 +441,7 @@ def run(args):
             min_duration=min_duration))
         exit(1)
 
+    # Create a portmapping so we can access nighthawk_service.
     popen_cmd = "kubectl -n \"{ns}\" port-forward svc/fortioclient {port}:9999".format(
         ns=os.environ.get("NAMESPACE", "twopods"), 
         port=NIGHTHAWK_GRPC_SERVICE_PORTMAP)

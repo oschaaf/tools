@@ -47,8 +47,9 @@ def convert_data(data):
             obj[key] = int(data[key] / 10 ** 9)
             continue
         if key == "Labels":
-             # We append "Nighthawk ", which the graph generator scripts does not like. 
-             # Hence we remove it here.
+            # We append "Nighthawk ", which the graph generator script does not like. 
+            # Hence we remove it here. The assert is to force maintenance when needed. 
+            assert("Nighthawk " in data[key])
             obj[key] = data[key].split(" ")[1]
             continue
 
