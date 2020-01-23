@@ -46,6 +46,13 @@ def convert_data(data):
         if key == "ActualDuration":
             obj[key] = int(data[key] / 10 ** 9)
             continue
+        if key == "Labels":
+             # We append "Nighthawk ", which the graph generator scripts does not like. 
+             # Hence we remove it here.
+            obj[key] = data[key].split(" ")[1]
+            continue
+
+
         # fill out other data key to obj key
         obj[key] = data[key]
 

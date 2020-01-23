@@ -44,6 +44,9 @@ spec:
   - name: nighthawk-service
     port: 9999
     protocol: TCP
+  - name: fortio-reporting
+    port: 9076
+    protocol: TCP
   selector:
     app: {{ $.name }}
 {{- if $.V.expose }}
@@ -447,11 +450,11 @@ spec:
         args:
         - report
         - -http-port
-        - "8077"
+        - "9076"
         - -grpc-port
-        - "8076"
+        - "disabled"
         - -redirect-port
-        - "8078"
+        - "disabled"
         - -data-dir
         - /var/lib/fortio/
 {{- else }}
