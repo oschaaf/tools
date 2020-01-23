@@ -125,31 +125,34 @@ class Fortio:
         else:
             sys.exit("invalid mesh %s, must be istio or linkerd" % mesh)
 
+    def get_protocol_uri_fragment(self):
+        return "https" if self.mode == "grpc" else "http" 
+
     def nosidecar(self):
-        basestr = "http://{svc}:{port}/"
+        basestr = "{protocol}://{svc}:{port}/"
         return "base", basestr.format(
-            svc=self.server.ip, port=self.ports[self.mode]["direct_port"])
+            svc=self.server.ip, port=self.ports[self.mode]["direct_port"], protocol=self.get_protocol_uri_fragment())
 
     def serversidecar(self):
-        basestr = "http://{svc}:{port}/"
+        basestr = "{protocol}://{svc}:{port}/"
         return "serveronly", basestr.format(
-            svc=self.server.ip, port=self.ports[self.mode]["port"])
+            svc=self.server.ip, port=self.ports[self.mode]["port"], protocol=self.get_protocol_uri_fragment())
 
     def clientsidecar(self, fortio_cmd):
-        basestr = "http://{svc}:{port}/"
+        basestr = "{protocol}://{svc}:{port}/"
         return "base", basestr.format(
-            svc=self.server.ip, port=self.ports[self.mode]["direct_port"])
+            svc=self.server.ip, port=self.ports[self.mode]["direct_port"], protocol=self.get_protocol_uri_fragment())
 
     def bothsidecar(self):
-        basestr = "http://{svc}:{port}/"
+        basestr = "{protocol}://{svc}:{port}/"
         return "both", basestr.format(
-            svc=self.server.labels["app"], port=self.ports[self.mode]["port"])
+            svc=self.server.labels["app"], port=self.ports[self.mode]["port"], protocol=self.get_protocol_uri_fragment())
 
     def ingress(self, fortio_cmd):
         url = urlparse(self.run_ingress)
         # If scheme is not defined fallback to http
         if url.scheme == "":
-            url = urlparse("http://{svc}".format(svc=self.run_ingress))
+            url = urlparse("{protocol}://{svc}".format(svc=self.run_ingress), protocol=self.get_protocol_uri_fragment())
 
         return "ingress", "{url}/".format(url=url.geturl())
 
