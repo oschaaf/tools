@@ -44,7 +44,6 @@ optional arguments:
 ### Sample output:
 
 ```
---dump-path /tmp/foo
 - cpu_percent: 2.4
   cpu_times:
     guest: 0.0
@@ -87,4 +86,28 @@ optional arguments:
     user: 5233.25
   processes: []
   timestamp: 1581979802.963791
+```
+
+## Expose the proc stat sampler output for prometheus scraping
+
+```bash
+# run in a separate terminal
+./prom.py  --track nginx envoy --http-port 8000
+```
+
+```bash
+curl --silent 127.0.0.1:8000 | head
+
+oschaaf@burst:~/code/istio/tools/procstat$ curl --silent 127.0.0.1:8000 | head
+# HELP python_gc_objects_collected_total Objects collected during gc
+# TYPE python_gc_objects_collected_total counter
+python_gc_objects_collected_total{generation="0"} 123.0
+python_gc_objects_collected_total{generation="1"} 255.0
+python_gc_objects_collected_total{generation="2"} 0.0
+# HELP python_gc_objects_uncollectable_total Uncollectable object found during GC
+# TYPE python_gc_objects_uncollectable_total counter
+python_gc_objects_uncollectable_total{generation="0"} 0.0
+python_gc_objects_uncollectable_total{generation="1"} 0.0
+python_gc_objects_uncollectable_total{generation="2"} 0.0
+
 ```
