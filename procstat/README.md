@@ -2,6 +2,8 @@
 
 ## Run tests
 
+The following command runs a couple of unit tests for the proc stat sampling system.
+
 ```bash
 python3 -m unittest discover -v tests/
 ```
@@ -95,8 +97,12 @@ optional arguments:
 ./prom.py  --track nginx envoy --http-port 8000
 ```
 
+# Querying the statistics
+
+Note: output is from an early version, which only tracked internal metrics from the prometheus client lib).
+
 ```bash
-curl --silent 127.0.0.1:8000 | head
+curl --silent 127.00.1:8000 | head
 
 oschaaf@burst:~/code/istio/tools/procstat$ curl --silent 127.0.0.1:8000 | head
 # HELP python_gc_objects_collected_total Objects collected during gc
@@ -111,3 +117,25 @@ python_gc_objects_uncollectable_total{generation="1"} 0.0
 python_gc_objects_uncollectable_total{generation="2"} 0.0
 
 ```
+
+## Exposing prometheus metrics in side car proxy containers.
+
+The following script will build a standalone binary, deploy it to the benchmark
+side car proxy containers, and fire up the service.
+
+```bash
+NAMESPACE=twopods-istio ./install_to_container.sh
+```
+
+## Testing if the service is running in containers
+
+The service will listen on port 8000 by default. Hence querying that port with curl ought to output a bunch of counters in prometheus format.
+
+``` bash
+kubectl --namespace twopods-istio exec fortioclient-6b58bf5799-hkq8l -c istio-proxy curl 127.0.0.1:8000
+
+...
+cpu_times_system 6217.48
+...
+```
+
