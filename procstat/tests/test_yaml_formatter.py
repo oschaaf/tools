@@ -26,7 +26,7 @@ class TestSampler(unittest.TestCase):
             p.kill()
         with open(FILENAME, "rb") as file:
             yaml = to_yaml(list(collector.read_dump(file)))
-        print(yaml)
+        #print(yaml)
         self.assertIn("timestamp:", yaml)
         self.assertIn("cpu_times:", yaml)
         self.assertIn("cpu_percent:", yaml)

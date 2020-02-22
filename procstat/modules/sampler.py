@@ -7,7 +7,7 @@ import time
 class Sampler:
     def __init__(self, process_names_of_interest=[], global_cpu_percent=True, global_cpu_times=True, per_cpu_percent=False, per_cpu_times=False):
         self.process_attrs_of_interest = [
-            "pid", "name", "cpu_affinity", "cpu_times", "cpu_percent"]
+            "pid", "name", "cpu_times", "cpu_percent"]
         self.global_cpu_percent = global_cpu_percent
         self.global_cpu_times = global_cpu_times
         self.per_cpu_percent = per_cpu_percent
@@ -38,7 +38,7 @@ class Sampler:
                 interval=0, percpu=True)
         if self.per_cpu_times:
             o["per_cpu_times"] = psutil.cpu_times(percpu=True)
-
+        o["cpu_stats"] = psutil.cpu_stats()
         o["processes"] = []
         for process in self.processes_of_interest:
             attrs = {}
