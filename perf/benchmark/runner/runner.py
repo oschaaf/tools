@@ -22,8 +22,11 @@ import subprocess
 import shlex
 import uuid
 import sys
+
 from subprocess import getoutput
 from urllib.parse import urlparse
+from threading import Thread
+from time import sleep
 import yaml
 from fortio import METRICS_START_SKIP_DURATION, METRICS_END_SKIP_DURATION
 
@@ -182,7 +185,8 @@ class Fortio:
 
         cacert_arg = ""
         if self.cacert is not None:
-            cacert_arg = "-cacert {cacert_path}".format(cacert_path=self.cacert)
+            cacert_arg = "-cacert {cacert_path}".format(
+                cacert_path=self.cacert)
 
         headers_cmd = ""
         if headers is not None:
@@ -200,6 +204,47 @@ class Fortio:
                 grpc=grpc,
                 cacert_arg=cacert_arg,
                 labels=labels)
+
+        def run_profiling_in_background(namespace, podname, filename_prefix, profiling_command):
+            exec_cmd = "kubectl exec -n {namespace} {podname} -c perf -it -- bash -c ".format(
+                namespace=os.environ.get("NAMESPACE", "twopods"),
+                podname=podname
+            )
+            filename = "{filename_prefix}-{podname}".format(
+                filename_prefix=filename_prefix, podname=podname)
+            profiler_cmd = "{exec_cmd} \"{profiling_command} > {filename}.profile\"".format(
+                profiling_command=profiling_command,
+                exec_cmd=exec_cmd,
+                filename=filename
+            )
+            process = subprocess.Popen(shlex.split(profiler_cmd))
+            process.wait()
+
+            flamegraph_cmd = "{exec_cmd} \"./FlameGraph/flamegraph.pl < {filename}.profile > {filename}.svg\"".format(
+                exec_cmd=exec_cmd,
+                filename=filename
+            )
+            process = subprocess.Popen(shlex.split(flamegraph_cmd))
+            process.wait()
+            kubectl_cp(podname + ":{filename}.svg".format(filename=filename),
+                       "{filename}.svg".format(filename=filename), "perf")
+
+        # We profile both the client and server, as we know both run on separate nodes in k8s
+        threads = []
+
+        if self.perf_record:
+            # /usr/share/bcc/tools/stackcount -p 19183 -U c:malloc
+            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
+                "NAMESPACE", "twopods"), self.client.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
+            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
+                "NAMESPACE", "twopods"), self.server.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
+            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
+                "NAMESPACE", "twopods"), self.client.name, "memory", "/usr/share/bcc/tools/stackcount -U c:malloc -df -D 40"]))
+            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
+                "NAMESPACE", "twopods"), self.server.name, "memory", "/usr/share/bcc/tools/stackcount -U c:malloc -df -D 40"]))
+
+        for thread in threads:
+            thread.start()
 
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
@@ -245,6 +290,14 @@ class Fortio:
             print('-------------- Running in baseline mode --------------')
             kubectl_exec(self.client.name, self.nosidecar(fortio_cmd))
 
+        print("wait for profilers to wrap up")
+
+        if self.perf_record:
+            for thread in threads:
+                thread.join()
+
+        print("profiler stopped")
+
 
 PERFCMD = "/usr/lib/linux-tools/4.4.0-131-generic/perf"
 FLAMESH = "flame.sh"
@@ -259,6 +312,7 @@ LOCAL_FLAMEOUTPUT = LOCAL_FLAMEDIR + "flameoutput/"
 
 
 def run_perf(mesh, pod, labels, duration=20):
+    return
     filename = labels + "_perf.data"
     filepath = PERFWD + filename
     perfpath = PERFWD + PERFSH
@@ -274,7 +328,8 @@ def run_perf(mesh, pod, labels, duration=20):
             duration=duration),
         container=mesh + "-proxy")
 
-    kubectl_cp(pod + ":" + filepath + ".perf", LOCAL_FLAMEOUTPUT + filename + ".perf", mesh + "-proxy")
+    kubectl_cp(pod + ":" + filepath + ".perf", LOCAL_FLAMEOUTPUT +
+               filename + ".perf", mesh + "-proxy")
     run_command_sync(LOCAL_FLAMEPATH + " " + filename + ".perf")
 
 
@@ -322,7 +377,8 @@ def validate(job_config):
             return False
         exp_type = required_fields[k]
         if not isinstance(job_config[k], exp_type):
-            print("expecting type of parameter {} to be {}, got {}".format(k, exp_type, type(job_config[k])))
+            print("expecting type of parameter {} to be {}, got {}".format(
+                k, exp_type, type(job_config[k])))
             return False
     return True
 
@@ -381,7 +437,7 @@ def run(args):
     if fortio.duration <= min_duration:
         print("Duration must be greater than {min_duration}".format(
             min_duration=min_duration))
-        exit(1)
+        # exit(1)
 
     for conn in fortio.conn:
         for qps in fortio.qps:

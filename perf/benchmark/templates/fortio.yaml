@@ -118,9 +118,33 @@ spec:
                 - "fortioclient"
 {{- end }}
             topologyKey: "kubernetes.io/hostname"
+{{- if $.Values.profilingMode }}
+      hostIPC: true
+      hostPID: true   
+{{- end }}
       volumes:
       - name: shared-data
         emptyDir: {}
+{{- if $.Values.profilingMode }}
+      - name: headers
+        hostPath:
+          path: /usr/src
+      - name: modules
+        hostPath:
+          path: /lib/modules
+      - name: docker
+        hostPath: 
+          path: /var/run/docker.sock
+      - name: kernel-debug
+        hostPath:
+          path: /sys/kernel/debug
+      - name: fs-cgroup
+        hostPath:
+          path: /sys/fs/cgroup
+      - name: fs-bpf
+        hostPath:
+          path: /sys/fs/bpf
+{{- end }}
       containers:
       - name: captured
         securityContext:
@@ -152,6 +176,27 @@ spec:
         args:
         - /bin/sleep
         - infinity
+{{- if $.Values.profilingMode }}
+      - name: perf
+        image: {{ $.Values.perfImage }}
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+              - SYS_ADMIN          
+        command: ["/bin/bash"]
+        args: ["-c", "tail -f /dev/null"]
+        volumeMounts:
+          - mountPath: /var/run/docker.sock
+            name: docker
+          - mountPath: /sys/kernel/debug
+            name: kernel-debug
+          - mountPath: /sys/fs/cgroup
+            name: fs-cgroup
+          - mountPath: /sys/fs/bpf
+            name: fs-bpf
+{{- end }}
       - name: uncaptured
         securityContext:
           runAsUser: 1
