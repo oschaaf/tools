@@ -9,7 +9,7 @@ RUN apt-get update \
             build-essential cmake flex git libedit-dev libllvm6.0 llvm-6.0-dev libclang-6.0-dev \
             zlib1g-dev python python3 python3-pip \
     && git clone --depth=1 https://github.com/BrendanGregg/FlameGraph \
-    && git clone https://github.com/iovisor/bcc.git \
+    && git clone --depth=1 https://github.com/iovisor/bcc.git \
     && mkdir tmp \
     && wget -qO- https://mirrors.edge.kernel.org/pub/linux/kernel/v4.x/linux-4.14.138.tar.gz | tar -C tmp/ -xzf - \
     && export MAKEFLAGS="-j$(nproc)" \
@@ -41,8 +41,10 @@ RUN apt-get update \
     cd /lib/modules/ && \
     ln -s 4.14.138 4.14.138+ && \
     cd ~ && \
-    mkdir bcc/build && \
-    cd bcc/build && \
+    cd bcc && \
+    git checkout 6b8a89673dbba9b9203a6555735e451dd9477836 && \
+    mkdir build && \
+    cd build && \
     cmake .. -DCMAKE_INSTALL_PREFIX=/usr && \
     make && \
     make install && \

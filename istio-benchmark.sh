@@ -60,6 +60,6 @@ if [[ ${do_run_benchmark} -eq "1" ]]; then
     ./setup_test.sh
     echo "Run tests"
     #python3 runner/runner.py  --config_file ./configs/istio/mixer_latency.yaml
-    python3 runner/runner.py --conn 2 --qps 1000 --duration 1 --serversidecar --perf=true
+    python3 runner/runner.py --conn 2 --qps 10000 --duration 100 --serversidecar --perf=true
     #python3 runner/runner.py --conn 2 --qps 1000 --duration 1 --serversidecar
 fi 

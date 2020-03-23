@@ -233,15 +233,18 @@ class Fortio:
         threads = []
 
         if self.perf_record:
-            # /usr/share/bcc/tools/stackcount -p 19183 -U c:malloc
             threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
                 "NAMESPACE", "twopods"), self.client.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
             threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
                 "NAMESPACE", "twopods"), self.server.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
             threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-                "NAMESPACE", "twopods"), self.client.name, "memory", "/usr/share/bcc/tools/stackcount -U c:malloc -df -D 40"]))
+                "NAMESPACE", "twopods"), self.client.name, "off-cpu", "/usr/share/bcc/tools/offcputime -df 40"]))
             threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-                "NAMESPACE", "twopods"), self.server.name, "memory", "/usr/share/bcc/tools/stackcount -U c:malloc -df -D 40"]))
+                "NAMESPACE", "twopods"), self.server.name, "off-cpu", "/usr/share/bcc/tools/offcputime -df 40"]))
+            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
+                "NAMESPACE", "twopods"), self.client.name, "memory", "/usr/share/bcc/tools/stackcount 'c:*alloc*' -df -D 40 -P"]))
+            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
+                "NAMESPACE", "twopods"), self.server.name, "memory", "/usr/share/bcc/tools/stackcount 'c:*alloc*' -df -D 40 -P"]))
 
         for thread in threads:
             thread.start()
@@ -402,6 +405,7 @@ def fortio_from_config_file(args):
         fortio.run_clientsidecar = job_config.get('run_clientsidecar', False)
         fortio.run_bothsidecar = job_config.get('run_bothsidecar', True)
         fortio.run_baseline = job_config.get('run_baseline', False)
+        fortio.run_ingress = job_config.get('run_ingress', False)
         fortio.mesh = job_config.get('mesh', 'istio')
         fortio.mode = job_config.get('mode', 'http')
         fortio.extra_labels = job_config.get('extra_labels')
