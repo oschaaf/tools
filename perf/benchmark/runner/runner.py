@@ -185,8 +185,7 @@ class Fortio:
 
         cacert_arg = ""
         if self.cacert is not None:
-            cacert_arg = "-cacert {cacert_path}".format(
-                cacert_path=self.cacert)
+            cacert_arg = "-cacert {cacert_path}".format(cacert_path=self.cacert)
 
         headers_cmd = ""
         if headers is not None:
@@ -315,6 +314,7 @@ LOCAL_FLAMEOUTPUT = LOCAL_FLAMEDIR + "flameoutput/"
 
 
 def run_perf(mesh, pod, labels, duration=20):
+    # Temporary disabled.
     return
     filename = labels + "_perf.data"
     filepath = PERFWD + filename
@@ -331,8 +331,7 @@ def run_perf(mesh, pod, labels, duration=20):
             duration=duration),
         container=mesh + "-proxy")
 
-    kubectl_cp(pod + ":" + filepath + ".perf", LOCAL_FLAMEOUTPUT +
-               filename + ".perf", mesh + "-proxy")
+    kubectl_cp(pod + ":" + filepath + ".perf", LOCAL_FLAMEOUTPUT + filename + ".perf", mesh + "-proxy")
     run_command_sync(LOCAL_FLAMEPATH + " " + filename + ".perf")
 
 
@@ -380,8 +379,7 @@ def validate(job_config):
             return False
         exp_type = required_fields[k]
         if not isinstance(job_config[k], exp_type):
-            print("expecting type of parameter {} to be {}, got {}".format(
-                k, exp_type, type(job_config[k])))
+            print("expecting type of parameter {} to be {}, got {}".format(k, exp_type, type(job_config[k])))
             return False
     return True
 
@@ -441,7 +439,7 @@ def run(args):
     if fortio.duration <= min_duration:
         print("Duration must be greater than {min_duration}".format(
             min_duration=min_duration))
-        # exit(1)
+        exit(1)
 
     for conn in fortio.conn:
         for qps in fortio.qps:
