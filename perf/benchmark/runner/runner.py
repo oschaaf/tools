@@ -205,11 +205,38 @@ class Fortio:
                 cacert_arg=cacert_arg,
                 labels=labels)
 
+        def get_pid_map(namespace, podname, exec_cmd):
+            pid_map = []
+            for line in getoutput("{exec_cmd} \"pgrep envoy\"".format(exec_cmd=exec_cmd)).split("\n"):
+                line = line.strip()
+                if line.isdigit():
+                    pid = int(line)
+                    pid_info = {}
+                    pid_info["namespace"] = namespace
+                    pid_info["podname"] = podname
+                    pid_info["node_pid"] = pid
+                    pid_info["node_ppid"] = getoutput(
+                        "{exec_cmd} \"ps -o ppid= -p {pid}\"".format(exec_cmd=exec_cmd, pid=pid)).strip()
+                    pid_in_container = getoutput("{exec_cmd} \"grep -soP 'NSpid:\t[0-9]*\t[0-9]*$' /proc/{pid}/status\"".format(
+                        exec_cmd=exec_cmd, pid=pid)).strip().split("\t")
+                    pid_info["pid_in_container"] = 0
+                    if len(pid_in_container) == 3:
+                        pid_info["pid_in_container"] = int(pid_in_container[2])
+                        docker_record = getoutput(
+                            "{exec_cmd} \"docker ps -q | xargs docker inspect --format '{{{{.State.Pid}}}},{{{{.ID}}}},{{{{.Name}}}}' | grep '{pid},'\"".format(exec_cmd=exec_cmd, pid=pid_info["node_ppid"]))
+                        pid_info["container_id"] = docker_record.split(",")[1]
+                        pid_info["container_name"] = docker_record.split(",")[2]
+                    pid_map.append(pid_info)
+            return pid_map
+
         def run_profiling_in_background(namespace, podname, filename_prefix, profiling_command):
             exec_cmd = "kubectl exec -n {namespace} {podname} -c perf -it -- bash -c ".format(
                 namespace=os.environ.get("NAMESPACE", "twopods"),
                 podname=podname
             )
+            pid_map = get_pid_map(namespace, podname, exec_cmd)
+            print(pid_map)
+            return
             filename = "{filename_prefix}-{podname}".format(
                 filename_prefix=filename_prefix, podname=podname)
             profiler_cmd = "{exec_cmd} \"{profiling_command} > {filename}.profile\"".format(
@@ -237,17 +264,18 @@ class Fortio:
                 "NAMESPACE", "twopods"), self.client.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
             threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
                 "NAMESPACE", "twopods"), self.server.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
-            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-                "NAMESPACE", "twopods"), self.client.name, "off-cpu", "/usr/share/bcc/tools/offcputime -df 40"]))
-            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-                "NAMESPACE", "twopods"), self.server.name, "off-cpu", "/usr/share/bcc/tools/offcputime -df 40"]))
-            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-                "NAMESPACE", "twopods"), self.client.name, "memory", "/usr/share/bcc/tools/stackcount 'c:*alloc*' -df -D 40 -P"]))
-            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-                "NAMESPACE", "twopods"), self.server.name, "memory", "/usr/share/bcc/tools/stackcount 'c:*alloc*' -df -D 40 -P"]))
+            # threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
+            #    "NAMESPACE", "twopods"), self.client.name, "off-cpu", "/usr/share/bcc/tools/offcputime -df 40"]))
+            # threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
+            #    "NAMESPACE", "twopods"), self.server.name, "off-cpu", "/usr/share/bcc/tools/offcputime -df 40"]))
+            # threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
+            #    "NAMESPACE", "twopods"), self.client.name, "memory", "/usr/share/bcc/tools/stackcount 'c:*alloc*' -df -D 40 -P"]))
+            # threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
+            #    "NAMESPACE", "twopods"), self.server.name, "memory", "/usr/share/bcc/tools/stackcount 'c:*alloc*' -df -D 40 -P"]))
 
         for thread in threads:
             thread.start()
+        return
 
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
