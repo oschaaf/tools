@@ -53,11 +53,11 @@ fi
 
 if [[ ${do_run_benchmark} -eq "1" ]]; then
     set -x
-    #kubectl delete namespace $NAMESPACE || true
+    kubectl delete namespace $NAMESPACE || true
   
     pushd "${istio_tools_root}/perf/benchmark"
     echo "Set up fortioclient / fortioserver pods"
-    #./setup_test.sh
+    ./setup_test.sh
     echo "Run tests"
     #python3 runner/runner.py  --config_file ./configs/istio/mixer_latency.yaml
     python3 runner/runner.py --conn 2 --qps 10000 --duration 100 --serversidecar --perf=true
