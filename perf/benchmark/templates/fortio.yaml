@@ -40,7 +40,11 @@ spec:
     protocol: TCP
   - name: grpc-pinga
     port: 8076
+{{- if $.Values.profilingMode }}
+  - name: node-exporter
+    port: 9100
     protocol: TCP
+{{- end }}
   selector:
     app: {{ $.name }}
 {{- if $.V.expose }}
@@ -98,7 +102,7 @@ spec:
         config.linkerd.io/skip-inbound-ports: "8077"
 {{- end }}
         # exclude inbound ports of the uncaptured container
-        traffic.sidecar.istio.io/excludeInboundPorts: "8076,8077,8078"
+        traffic.sidecar.istio.io/excludeInboundPorts: "8076,8077,8078,{{ $.Values.nodeExporterPort }}"
         sidecar.istio.io/proxyCPU: {{ $.Values.proxy.cpu }}
         sidecar.istio.io/proxyMemory: {{ $.Values.proxy.memory }}
       labels:
@@ -186,7 +190,10 @@ spec:
             add:
               - SYS_ADMIN          
         command: ["/bin/bash"]
-        args: ["-c", "tail -f /dev/null"]
+        args: ["-c", "node_exporter", "--web.listen-address", ":{{ $.Values.nodeExporterPort }}"]
+        ports:
+        - containerPort: {{ $.Values.nodeExporterPort }}
+          protocol: TCP
         volumeMounts:
           - mountPath: /var/run/docker.sock
             name: docker

@@ -205,18 +205,18 @@ class Fortio:
                 cacert_arg=cacert_arg,
                 labels=labels)
 
-        def get_pid_map(namespace, podname, exec_cmd):
+        def get_pid_map(exec_cmd):
             pid_map = []
             for line in getoutput("{exec_cmd} \"pgrep envoy\"".format(exec_cmd=exec_cmd)).split("\n"):
                 line = line.strip()
                 if line.isdigit():
                     pid = int(line)
                     pid_info = {}
-                    pid_info["namespace"] = namespace
-                    pid_info["podname"] = podname
                     pid_info["node_pid"] = pid
-                    pid_info["node_ppid"] = getoutput(
-                        "{exec_cmd} \"ps -o ppid= -p {pid}\"".format(exec_cmd=exec_cmd, pid=pid)).strip()
+                    pid_details = getoutput(
+                        "{exec_cmd} \"ps --no-headers -o 'ppid,command' -p {pid}\"".format(exec_cmd=exec_cmd, pid=pid)).strip().split(" ")
+                    pid_info["node_ppid"] = pid_details[0]
+                    pid_info["node_pid_line"] = str.join(" ", pid_details[1:])
                     pid_in_container = getoutput("{exec_cmd} \"grep -soP 'NSpid:\t[0-9]*\t[0-9]*$' /proc/{pid}/status\"".format(
                         exec_cmd=exec_cmd, pid=pid)).strip().split("\t")
                     pid_info["pid_in_container"] = 0
@@ -225,18 +225,12 @@ class Fortio:
                         docker_record = getoutput(
                             "{exec_cmd} \"docker ps -q | xargs docker inspect --format '{{{{.State.Pid}}}},{{{{.ID}}}},{{{{.Name}}}}' | grep '{pid},'\"".format(exec_cmd=exec_cmd, pid=pid_info["node_ppid"]))
                         pid_info["container_id"] = docker_record.split(",")[1]
-                        pid_info["container_name"] = docker_record.split(",")[2]
+                        pid_info["container_name"] = docker_record.split(",")[
+                            2]
                     pid_map.append(pid_info)
             return pid_map
 
-        def run_profiling_in_background(namespace, podname, filename_prefix, profiling_command):
-            exec_cmd = "kubectl exec -n {namespace} {podname} -c perf -it -- bash -c ".format(
-                namespace=os.environ.get("NAMESPACE", "twopods"),
-                podname=podname
-            )
-            pid_map = get_pid_map(namespace, podname, exec_cmd)
-            print(pid_map)
-            return
+        def run_profiling_in_background(exec_cmd, podname, filename_prefix, profiling_command):
             filename = "{filename_prefix}-{podname}".format(
                 filename_prefix=filename_prefix, podname=podname)
             profiler_cmd = "{exec_cmd} \"{profiling_command} > {filename}.profile\"".format(
@@ -260,10 +254,27 @@ class Fortio:
         threads = []
 
         if self.perf_record:
-            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-                "NAMESPACE", "twopods"), self.client.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
-            threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-                "NAMESPACE", "twopods"), self.server.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
+            exec_cmd_on_server_pod = "kubectl exec -n {namespace} {podname} -c perf -it -- bash -c ".format(
+                namespace=os.environ.get("NAMESPACE", "twopods"),
+                podname=self.client.name
+            )
+            exec_cmd_on_client_pod = "kubectl exec -n {namespace} {podname} -c perf -it -- bash -c ".format(
+                namespace=os.environ.get("NAMESPACE", "twopods"),
+                podname=self.server.name
+            )
+            pid_map = get_pid_map(exec_cmd_on_server_pod)
+            print("server pod info")
+            for entry in pid_map:
+                print(entry)
+            pid_map = get_pid_map(exec_cmd_on_client_pod)
+            print("client pod info")
+            for entry in pid_map:
+                print(entry)
+            return
+            threads.append(Thread(target=run_profiling_in_background, args=[
+                           exec_cmd_on_server_pod, self.client.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
+            threads.append(Thread(target=run_profiling_in_background, args=[
+                           exec_cmd_on_client_pod, self.server.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
             # threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
             #    "NAMESPACE", "twopods"), self.client.name, "off-cpu", "/usr/share/bcc/tools/offcputime -df 40"]))
             # threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(

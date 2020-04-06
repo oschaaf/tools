@@ -8,6 +8,9 @@ RUN apt-get update \
             make gcc bc libelf-dev bison flex \
             build-essential cmake flex git libedit-dev libllvm6.0 llvm-6.0-dev libclang-6.0-dev \
             zlib1g-dev python python3 python3-pip \
+    && wget -qO- https://github.com/prometheus/node_exporter/releases/download/v0.18.1/node_exporter-0.18.1.linux-amd64.tar.gz | tar -C . -xvzf - \
+    && cp node_exporter-*/node_exporter /usr/bin/ \
+    && rm -rf node_exporter-* \
     && git clone --depth=1 https://github.com/BrendanGregg/FlameGraph \
     && git clone --depth=1 https://github.com/iovisor/bcc.git \
     && mkdir tmp \
