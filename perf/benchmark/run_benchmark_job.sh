@@ -41,6 +41,7 @@ export USE_MASON_RESOURCE="${USE_MASON_RESOURCE:-True}"
 export CLEAN_CLUSTERS="${CLEAN_CLUSTERS:-True}"
 export NAMESPACE=${NAMESPACE:-'twopods-istio'}
 export PROMETHEUS_NAMESPACE=${PROMETHEUS_NAMESPACE:-'istio-system'}
+export TRIALRUN=${TRIALRUN:-False}
 
 function setup_metrics() {
   # shellcheck disable=SC2155
@@ -84,6 +85,9 @@ function get_benchmark_data() {
 }
 
 function exit_handling() {
+  if [[ "${TRIALRUN}" == "True" ]]; then
+     return
+  fi
   # copy raw data from fortio client pod
   kubectl --namespace "${NAMESPACE}" cp "${FORTIO_CLIENT_POD}":/var/lib/fortio /tmp/rawdata -c shell
   gsutil -q cp -r /tmp/rawdata "gs://${GCS_BUCKET}/${OUTPUT_DIR}/rawdata"
@@ -112,22 +116,36 @@ function setup_fortio_and_prometheus() {
 }
 
 function collect_envoy_info() {
-  POD_NAME=${1}
-  FILE_SUFFIX=${2}
+  CONFIG_NAME=${1}
+  POD_NAME=${2}
+  FILE_SUFFIX=${3}
 
-  ENVOY_DUMP_NAME="${POD_NAME}_${FILE_SUFFIX}.yaml"
+  ENVOY_DUMP_NAME="${POD_NAME}_${CONFIG_NAME}_${FILE_SUFFIX}.yaml"
   kubectl exec -n "${NAMESPACE}" "${POD_NAME}" -c istio-proxy -- curl http://localhost:15000/"${FILE_SUFFIX}" > "${ENVOY_DUMP_NAME}"
   gsutil -q cp -r "${ENVOY_DUMP_NAME}" "gs://${GCS_BUCKET}/${OUTPUT_DIR}/${FILE_SUFFIX}/${ENVOY_DUMP_NAME}"
 }
 
 function collect_config_dump() {
-  collect_envoy_info "${FORTIO_CLIENT_POD}" "config_dump"
-  collect_envoy_info "${FORTIO_SERVER_POD}" "config_dump"
+  collect_envoy_info "${1}" "${FORTIO_CLIENT_POD}" "config_dump"
+  collect_envoy_info "${1}" "${FORTIO_SERVER_POD}" "config_dump"
 }
 
 function collect_clusters_info() {
-  collect_envoy_info "${FORTIO_CLIENT_POD}" "clusters"
-  collect_envoy_info "${FORTIO_SERVER_POD}" "clusters"
+  collect_envoy_info "${1}" "${FORTIO_CLIENT_POD}" "clusters"
+  collect_envoy_info "${1}" "${FORTIO_SERVER_POD}" "clusters"
+}
+
+function read_perf_test_conf()
+{
+  perf_test_conf="${1}"
+  while IFS="=" read -r key value; do
+    case "$key" in
+      '#'*) ;;
+      *)
+        # shellcheck disable=SC2086
+        export ${key}="${value}"
+    esac
+  done < "${perf_test_conf}"
 }
 
 # install pipenv
@@ -171,9 +189,9 @@ pushd "${WD}"
 export ISTIO_INJECT="true"
 ./setup_test.sh
 popd
-dt=$(date +'%Y%m%d-%H')
-SHA=$(git rev-parse --short "${GIT_SHA}")
-export OUTPUT_DIR="benchmark_data-${GIT_BRANCH}.${dt}.${SHA}"
+dt=$(date +'%Y%m%d')
+# Current output dir should be like: 20191025_1.5-alpha.f19fb40b777e357b605e85c04fb871578592ad1e
+export OUTPUT_DIR="${dt}_${TAG}"
 LOCAL_OUTPUT_DIR="/tmp/${OUTPUT_DIR}"
 mkdir -p "${LOCAL_OUTPUT_DIR}"
 
@@ -192,7 +210,16 @@ DEFAULT_CR_PATH="${ROOT}/istio-install/istioctl_profiles/default.yaml"
 # For adding or modifying configurations, refer to perf/benchmark/README.md
 CONFIG_DIR="${WD}/configs/istio"
 
+read_perf_test_conf "${WD}/configs/run_perf_test.conf"
+
 for dir in "${CONFIG_DIR}"/*; do
+    # get the last directory name after splitting dir path by '/', which is the configuration dir name
+    config_name="$(basename "${dir}")"
+    # skip the test config that is disabled to run
+    if ! ${!config_name:-false}; then
+        continue
+    fi
+
     pushd "${dir}"
     # install istio with custom overlay
     if [[ -e "./installation.yaml" ]]; then
@@ -208,8 +235,12 @@ for dir in "${CONFIG_DIR}"/*; do
        source prerun.sh
     fi
 
+    # TRIALRUN as safe check for presubmit
+    if [[ "${TRIALRUN}" == "True" ]]; then
+       continue
+    fi
     # collect config dump after prerun.sh and before test run, to verify test setup is correct
-    collect_config_dump
+    collect_config_dump "${config_name}"
 
     # run test and get data
     if [[ -e "./cpu_mem.yaml" ]]; then
@@ -220,7 +251,7 @@ for dir in "${CONFIG_DIR}"/*; do
     fi
 
     # collect clusters info after test run and before cleanup script postrun.sh
-    collect_clusters_info
+    collect_clusters_info "${config_name}"
 
     # custom post run
     if [[ -e "./postrun.sh" ]]; then
@@ -234,6 +265,10 @@ for dir in "${CONFIG_DIR}"/*; do
 
     popd
 done
+
+if [[ "${TRIALRUN}" == "True" ]]; then
+   get_benchmark_data "${WD}/configs/trialrun.yaml"
+fi
 
 #echo "collect flame graph ..."
 #collect_flame_graph
