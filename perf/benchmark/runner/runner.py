@@ -90,7 +90,9 @@ class Fortio:
             bothsidecar=True,
             ingress=None,
             mesh="istio",
-            cacert=None):
+            cacert=None,
+            custom_profiling_command=None,
+            custom_profiling_name="default-profile"):
         self.run_id = str(uuid.uuid4()).partition('-')[0]
         self.headers = headers
         self.conn = conn
@@ -103,6 +105,8 @@ class Fortio:
         self.r = "0.00005"
         self.telemetry_mode = telemetry_mode
         self.perf_record = perf_record
+        self.custom_profiling_command = custom_profiling_command
+        self.custom_profiling_name = custom_profiling_name
         self.server = pod_info("-lapp=" + server, namespace=self.ns)
         self.client = pod_info("-lapp=" + client, namespace=self.ns)
         self.additional_args = additional_args
@@ -205,31 +209,6 @@ class Fortio:
                 cacert_arg=cacert_arg,
                 labels=labels)
 
-        def get_pid_map(exec_cmd):
-            pid_map = []
-            for line in getoutput("{exec_cmd} \"pgrep envoy\"".format(exec_cmd=exec_cmd)).split("\n"):
-                line = line.strip()
-                if line.isdigit():
-                    pid = int(line)
-                    pid_info = {}
-                    pid_info["node_pid"] = pid
-                    pid_details = getoutput(
-                        "{exec_cmd} \"ps --no-headers -o 'ppid,command' -p {pid}\"".format(exec_cmd=exec_cmd, pid=pid)).strip().split(" ")
-                    pid_info["node_ppid"] = pid_details[0]
-                    pid_info["node_pid_line"] = str.join(" ", pid_details[1:])
-                    pid_in_container = getoutput("{exec_cmd} \"grep -soP 'NSpid:\t[0-9]*\t[0-9]*$' /proc/{pid}/status\"".format(
-                        exec_cmd=exec_cmd, pid=pid)).strip().split("\t")
-                    pid_info["pid_in_container"] = 0
-                    if len(pid_in_container) == 3:
-                        pid_info["pid_in_container"] = int(pid_in_container[2])
-                        docker_record = getoutput(
-                            "{exec_cmd} \"docker ps -q | xargs docker inspect --format '{{{{.State.Pid}}}},{{{{.ID}}}},{{{{.Name}}}}' | grep '{pid},'\"".format(exec_cmd=exec_cmd, pid=pid_info["node_ppid"]))
-                        pid_info["container_id"] = docker_record.split(",")[1]
-                        pid_info["container_name"] = docker_record.split(",")[
-                            2]
-                    pid_map.append(pid_info)
-            return pid_map
-
         def run_profiling_in_background(exec_cmd, podname, filename_prefix, profiling_command):
             filename = "{filename_prefix}-{podname}".format(
                 filename_prefix=filename_prefix, podname=podname)
@@ -238,55 +217,51 @@ class Fortio:
                 exec_cmd=exec_cmd,
                 filename=filename
             )
+            # Run the profile collection tool, and wait for it to finish.
             process = subprocess.Popen(shlex.split(profiler_cmd))
             process.wait()
-
-            flamegraph_cmd = "{exec_cmd} \"./FlameGraph/flamegraph.pl < {filename}.profile > {filename}.svg\"".format(
+            # Next we feed the profiling data to the flamegraphing script.
+            flamegraph_cmd = "{exec_cmd} \"./FlameGraph/flamegraph.pl --title='{profiling_command} Flame Graph'  < {filename}.profile > {filename}.svg\"".format(
                 exec_cmd=exec_cmd,
+                profiling_command=profiling_command,
                 filename=filename
             )
             process = subprocess.Popen(shlex.split(flamegraph_cmd))
             process.wait()
+            # Lastly copy the resulting flamegraph out of the container
             kubectl_cp(podname + ":{filename}.svg".format(filename=filename),
-                       "{filename}.svg".format(filename=filename), "perf")
+                       "flame/flameoutput/{filename}.svg".format(filename=filename), "perf")
 
-        # We profile both the client and server, as we know both run on separate nodes in k8s
         threads = []
 
-        if self.perf_record:
-            exec_cmd_on_server_pod = "kubectl exec -n {namespace} {podname} -c perf -it -- bash -c ".format(
-                namespace=os.environ.get("NAMESPACE", "twopods"),
-                podname=self.client.name
-            )
-            exec_cmd_on_client_pod = "kubectl exec -n {namespace} {podname} -c perf -it -- bash -c ".format(
-                namespace=os.environ.get("NAMESPACE", "twopods"),
-                podname=self.server.name
-            )
-            pid_map = get_pid_map(exec_cmd_on_server_pod)
-            print("server pod info")
-            for entry in pid_map:
-                print(entry)
-            pid_map = get_pid_map(exec_cmd_on_client_pod)
-            print("client pod info")
-            for entry in pid_map:
-                print(entry)
-            return
-            threads.append(Thread(target=run_profiling_in_background, args=[
-                           exec_cmd_on_server_pod, self.client.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
-            threads.append(Thread(target=run_profiling_in_background, args=[
-                           exec_cmd_on_client_pod, self.server.name, "on-cpu", "/usr/share/bcc/tools/profile -df 40"]))
-            # threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-            #    "NAMESPACE", "twopods"), self.client.name, "off-cpu", "/usr/share/bcc/tools/offcputime -df 40"]))
-            # threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-            #    "NAMESPACE", "twopods"), self.server.name, "off-cpu", "/usr/share/bcc/tools/offcputime -df 40"]))
-            # threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-            #    "NAMESPACE", "twopods"), self.client.name, "memory", "/usr/share/bcc/tools/stackcount 'c:*alloc*' -df -D 40 -P"]))
-            # threads.append(Thread(target=run_profiling_in_background, args=[os.environ.get(
-            #    "NAMESPACE", "twopods"), self.server.name, "memory", "/usr/share/bcc/tools/stackcount 'c:*alloc*' -df -D 40 -P"]))
+        if self.custom_profiling_command:
+            # We run any custom profiling command on both pods, as one runs on each node we're interested in.
+            for pod in [self.client.name, self.server.name]:
+                exec_cmd_on_pod = "kubectl exec -n {namespace} {podname} -c perf -it -- bash -c ".format(
+                    namespace=os.environ.get("NAMESPACE", "twopods"),
+                    podname=pod
+                )
+                
+                # Wait for node_exporter to run, which indicates the profiling initialization container has finished initializing.
+                # once the init probe is supported, move this to a http probe instead in fortio.yaml
+                ne_pid = ""
+                attempts = 0
+                while ne_pid == "" and attempts < 60:
+                    ne_pid = getoutput("{exec_cmd} \"pgrep 'node_exporter'\"".format(exec_cmd=exec_cmd_on_pod)).strip()
+                    attempts = attempts + 1
+                    print(".")
+                    sleep(1)
+
+                # Find side car process id's in case the profiling command needs it.
+                sidecar_ppid = getoutput("{exec_cmd} \"pgrep -f 'pilot-agent proxy sidecar'\"".format(exec_cmd=exec_cmd_on_pod)).strip()
+                sidecar_pid = getoutput("{exec_cmd} \"pgrep -P {sidecar_ppid}\"".format(exec_cmd=exec_cmd_on_pod, sidecar_ppid=sidecar_ppid)).strip()
+                profiling_command = self.custom_profiling_command.format(
+                    duration=self.duration, sidecar_pid=sidecar_pid)
+                threads.append(Thread(target=run_profiling_in_background, args=[
+                    exec_cmd_on_pod, pod, self.custom_profiling_name, profiling_command]))
 
         for thread in threads:
             thread.start()
-        return
 
         if self.run_ingress:
             print('-------------- Running in ingress mode --------------')
@@ -332,13 +307,11 @@ class Fortio:
             print('-------------- Running in baseline mode --------------')
             kubectl_exec(self.client.name, self.nosidecar(fortio_cmd))
 
-        print("wait for profilers to wrap up")
-
-        if self.perf_record:
-            for thread in threads:
-                thread.join()
-
-        print("profiler stopped")
+        if len(threads) > 0:
+            if self.custom_profiling_command:
+                for thread in threads:
+                    thread.join()
+            print("background profiler thread finished - flamegraphs are available in flame/flameoutput")
 
 
 PERFCMD = "/usr/lib/linux-tools/4.4.0-131-generic/perf"
@@ -354,7 +327,6 @@ LOCAL_FLAMEOUTPUT = LOCAL_FLAMEDIR + "flameoutput/"
 
 
 def run_perf(mesh, pod, labels, duration=20):
-    return
     filename = labels + "_perf.data"
     filepath = PERFWD + filename
     perfpath = PERFWD + PERFSH
@@ -475,7 +447,9 @@ def run(args):
             mode=args.mode,
             mesh=args.mesh,
             telemetry_mode=args.telemetry_mode,
-            cacert=args.cacert)
+            cacert=args.cacert,
+            custom_profiling_command=args.custom_profiling_command,
+            custom_profiling_name=args.custom_profiling_name)
 
     if fortio.duration <= min_duration:
         print("Duration must be greater than {min_duration}".format(
@@ -535,6 +509,14 @@ def get_parser():
         "--perf",
         help="also run perf and produce flame graph",
         default=False)
+    parser.add_argument(
+        "--custom_profiling_command",
+        help="Run custom profiling commands on the nodes for the client and server, and produce a flamegraph based on their outputs. E.g. --custom_profiling_command=\"/usr/share/bcc/tools/profile -df 40\"",
+        default=False)
+    parser.add_argument(
+        "--custom_profiling_name",
+        help="Name to be added to the flamegraph resulting from --custom_profiling_command",
+        default="default-profile")
     parser.add_argument(
         "--ingress",
         help="run traffic through ingress, should be a valid URL",

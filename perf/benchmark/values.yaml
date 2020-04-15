@@ -15,8 +15,6 @@ appresources1:
 
 fortioImage: fortio/fortio:latest
 curlImage: tutum/curl:trusty
-perfImage: oschaaf/istio-perf:dev
-nodeExporterPort: 9100
 domain: local
 gateway: fortio-gateway
 rbac:
@@ -46,4 +44,6 @@ client: # client overrides
 cert: false
 interceptionMode: REDIRECT
 profilingMode: true
+perfImage: oschaaf/istio-tools:profiling
+nodeExporterPort: 9100
 namespace: ""

@@ -60,6 +60,55 @@ if [[ ${do_run_benchmark} -eq "1" ]]; then
     ./setup_test.sh
     echo "Run tests"
     #python3 runner/runner.py  --config_file ./configs/istio/mixer_latency.yaml
-    python3 runner/runner.py --conn 2 --qps 10000 --duration 100 --serversidecar --perf=true
-    #python3 runner/runner.py --conn 2 --qps 1000 --duration 1 --serversidecar
+
+# nsenter --target 1 --mount --uts --ipc --net --pid -- bash -l
+# -v, --volume=[host-src:]container-dest[:<options>]: Bind mount a volume.
+#docker run --privileged \
+#  -v /sys:/sys \
+#  -v /etc/lsb-release:/etc/lsb-release.host \
+#  -v /var/cache/linux-headers/modules_dir:/lib/modules \
+#  -v /lib/modules:/lib/modules.host \
+#  -v /var/cache/linux-headers/generated:/usr/src \
+#  -v /usr:/usr-host \
+#  -v /boot:/boot.host \
+#  --rm -it ubuntu:18.04
+
+#[ ! -d "/usr/src/linux-lakitu-*" ] && apt update \
+#  && apt install -y curl \
+#  && bash <(curl https://gist.githubusercontent.com/oschaaf/494ef6cfcc6d0d0ad72b079f2c62409e/raw/2138a7dbb1b7a2192dd7048742f8edf3193829cb/headers.sh)
+
+
+#apk add make gcc curl bash 
+#cd ~
+#bash
+#wget https://gist.githubusercontent.com/oschaaf/494ef6cfcc6d0d0ad72b079f2c62409e/raw/2138a7dbb1b7a2192dd7048742f8edf3193829cb/headers.sh
+#chmod +x headers.sh
+#./headers.sh
+#!/bin/bash
+
+# set -Eeuo pipefail
+
+# kversion=v"$(uname -r | sed -E 's/\+*$//')"
+# wget "https://chromium.googlesource.com/chromiumos/third_party/kernel/+archive/$kversion.tar.gz"
+# mkdir kernel
+# tar xzf "$kversion.tar.gz" -C kernel
+# echo "export BPFTRACE_KERNEL_SOURCE=$PWD/kernel"
+
+
+python3 runner/runner.py --conn 20 --qps 20000 --duration 10 --custom_profiling_command="profile-bpfcc -df {duration} -p {sidecar_pid}" --custom_profiling_name="bcc-oncputime-sidecar"
+#python3 runner/runner.py --conn 20 --qps 20000 --duration 10 --serversidecar --custom_profiling_command="offcputime-bpfcc -df {duration} -p {sidecar_pid}" --custom_profiling_name="bcc-offcputime-sidecar"
+#python3 runner/runner.py --conn 20 --qps 20000 --duration 10 --serversidecar --custom_profiling_command="offwaketime-bpfcc -df {duration} -p {sidecar_pid}" --custom_profiling_name="bcc-offwaketime-sidecar"
+#python3 runner/runner.py --conn 20 --qps 20000 --duration 10 --serversidecar --custom_profiling_command="wakeuptime-bpfcc -f -p {sidecar_pid} {duration}" --custom_profiling_name="bcc-wakeuptime-sidecar"
+#python3 runner/runner.py --conn 20 --qps 20000 --duration 10 --serversidecar --custom_profiling_command="perf record -F 99 -a -g -p {sidecar_pid} -- sleep {duration} && perf script | ~/FlameGraph/stackcollapse-perf.pl | c++filt -n" --custom_profiling_name="perf-oncputime-sidecar"
+
+
+    #python3 runner/runner.py --conn 2 --qps 10000 --duration 10 --custom_profiling_command="profile-bpfcc -df {duration}" --custom_profiling_name="bcc-oncputime-machine-wide"
+    #python3 runner/runner.py --conn 2 --qps 10000 --duration 10 --serversidecar --custom_profiling_command="stackcount-bpfcc 'c:*alloc*' -df -D {duration} -P" --custom_profiling_name="bcc-stackcount-alloc-machine-wide"
+    #python3 runner/runner.py --conn 2 --qps 100000 --duration 50 --serversidecar --custom_profiling_command="stackcount-bpfcc c:*alloc* -df -D {duration} -p {sidecar_pid}" --custom_profiling_name="bcc-stackcount-alloc-sidecar"
+    #python3 runner/runner.py --conn 2 --qps 10000 --duration 10 --serversidecar --custom_profiling_command="offcputime-bpfcc -df {duration}" --custom_profiling_name="bcc-offcputime-machine-wide"
+    #python3 runner/runner.py --conn 2 --qps 10000 --duration 10 --serversidecar --custom_profiling_command="perf record -F 99 -a -g -- sleep {duration} && perf script | ~/FlameGraph/stackcollapse-perf.pl  | c++filt -n" --custom_profiling_name="perf-on-cpu-machine-wide"
+    #python3 runner/runner.py --conn 2 --qps 10000 --duration 10 --custom_profiling_command="perf record -e syscalls:sys_enter_brk -a -g -- sleep {duration} && perf script | ~/FlameGraph/stackcollapse-perf.pl  | c++filt -n" --custom_profiling_name="perf-brk-machine-wide"
+    #python3 runner/runner.py --conn 2 --qps 10000 --duration 10 --custom_profiling_command="perf record -e syscalls:sys_enter_mmap -a -g -- sleep {duration} && perf script | ~/FlameGraph/stackcollapse-perf.pl  | c++filt -n" --custom_profiling_name="perf-mmap-machine-wide"
+
+    #python3 runner/runner.py --conn 2 --qps 1000 --duration 10 --serversidecar
 fi 

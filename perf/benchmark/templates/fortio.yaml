@@ -130,24 +130,21 @@ spec:
       - name: shared-data
         emptyDir: {}
 {{- if $.Values.profilingMode }}
-      - name: headers
+      - name: sys
         hostPath:
-          path: /usr/src
-      - name: modules
+          path: /sys
+      - name: lsb-release
         hostPath:
-          path: /lib/modules
-      - name: docker
-        hostPath: 
-          path: /var/run/docker.sock
-      - name: kernel-debug
+          path: /etc/lsb-release
+      - name: modules-generated
         hostPath:
-          path: /sys/kernel/debug
-      - name: fs-cgroup
+          path: /var/cache/kernel/modules
+      - name: headers-generated
         hostPath:
-          path: /sys/fs/cgroup
-      - name: fs-bpf
+          path: /var/cache/kernel/headers
+      - name: usr-host
         hostPath:
-          path: /sys/fs/bpf
+          path: /usr
 {{- end }}
       containers:
       - name: captured
@@ -188,21 +185,24 @@ spec:
           privileged: true
           capabilities:
             add:
-              - SYS_ADMIN          
+              - SYS_ADMIN
+              - SYS_PTRACE
         command: ["/bin/bash"]
-        args: ["-c", "node_exporter", "--web.listen-address", ":{{ $.Values.nodeExporterPort }}"]
+        args: ["-c", "./setup-node-for-profiling.sh :{{ $.Values.nodeExporterPort }}"]
         ports:
         - containerPort: {{ $.Values.nodeExporterPort }}
           protocol: TCP
         volumeMounts:
-          - mountPath: /var/run/docker.sock
-            name: docker
-          - mountPath: /sys/kernel/debug
-            name: kernel-debug
-          - mountPath: /sys/fs/cgroup
-            name: fs-cgroup
-          - mountPath: /sys/fs/bpf
-            name: fs-bpf
+          - mountPath: /sys
+            name: sys
+          - mountPath: /etc/lsb-release.host
+            name: lsb-release
+          - mountPath: /lib/modules
+            name: modules-generated
+          - mountPath: /usr/src
+            name: headers-generated
+          - mountPath: /usr-host
+            name: usr-host
 {{- end }}
       - name: uncaptured
         securityContext:
